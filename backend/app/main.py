@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.services import openaq_client, gemini_client
-from app.services import historical_data, forecast
+from app.services import historical_data, forecast, earth_engine_client
 from app.services.h3_utils import latlng_to_cell, bin_points
 from app.services.hotspot_detection import classify_cell, rank_hotspots
 
@@ -133,9 +133,10 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
         if cell in sensor_bins:
             sensor_pm25 = max(p["pm25"] for p in sensor_bins[cell])
 
-        # Placeholder until Earth Engine integration lands — random-ish but
-        # deterministic per cell so the demo is stable across refreshes.
-        satellite_anomaly_score = _mock_satellite_score(cell)
+        # Real Earth Engine data if configured, mock fallback otherwise —
+        # so the app works for both of you regardless of who has EE
+        # credentials set up locally.
+        satellite_anomaly_score = _get_satellite_score(cell)
 
         reports = citizen_bins.get(cell, [])
         classified = classify_cell(
@@ -235,6 +236,21 @@ async def get_forecast(h3_cell: str, hours: int = 24):
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"h3_cell": h3_cell, "predictions": predictions}
+
+
+def _get_satellite_score(cell: str) -> float:
+    """Tries real Earth Engine Sentinel-5P data first; falls back to the
+    deterministic mock if EE isn't configured yet or the query fails
+    (e.g. no cloud-free pass in the lookback window for this cell)."""
+    try:
+        real_score = earth_engine_client.get_aerosol_index(cell)
+        if real_score is not None:
+            return real_score
+    except RuntimeError:
+        pass  # EE not configured — expected until .env has EE credentials
+    except Exception:
+        pass  # any live EE query failure — don't take the whole endpoint down
+    return _mock_satellite_score(cell)
 
 
 def _mock_satellite_score(cell: str) -> float:

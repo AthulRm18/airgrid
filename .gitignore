@@ -29,3 +29,6 @@ build/
 *.pkl
 *.h5
 backend/data/*.csv
+
+.env
+backend/.env
