@@ -1,16 +1,24 @@
 """
 OpenAQ v3 client — real ground-sensor air quality data.
 
-OpenAQ now requires a free API key (register at https://explore.openaq.org/register).
-Set it as OPENAQ_API_KEY in your environment / .env file.
+Set OPENAQ_API_KEY in .env (free key at https://explore.openaq.org/register).
+Falls back to realistic mock data if no key is present.
 
-If no key is set, falls back to realistic mock data so the rest of the
-pipeline (H3 binning, hotspot detection, forecasting, dashboard) can be
-built and demoed without blocking on registration.
+Real v3 /locations/{id}/latest response shape (one item per sensor reading):
+[
+  {
+    "datetime": {"utc": "...", "local": "..."},
+    "value": 123.4,
+    "coordinates": {"latitude": ..., "longitude": ...},
+    "sensors": [{"id": ..., "name": "pm25 µg/m³", "parameter": {"name": "pm25", ...}}]
+  },
+  ...
+]
 """
 import os
 import random
-from datetime import datetime, timedelta, timezone
+import asyncio
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -25,54 +33,81 @@ def _get_api_key() -> Optional[str]:
 async def fetch_locations(bbox: str, limit: int = 100) -> list[dict]:
     """
     Fetch monitoring station locations within a bounding box.
-    bbox format: "min_lng,min_lat,max_lng,max_lat" (OpenAQ's expected order)
+    bbox: "min_lng,min_lat,max_lng,max_lat"
     """
     api_key = _get_api_key()
     if not api_key:
         return _mock_locations(bbox, limit)
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{OPENAQ_BASE_URL}/locations",
-            params={"bbox": bbox, "limit": limit},
-            headers={"X-API-Key": api_key},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        return resp.json().get("results", [])
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{OPENAQ_BASE_URL}/locations",
+                params={"bbox": bbox, "limit": limit},
+                headers={"X-API-Key": api_key},
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            return resp.json().get("results", [])
+    except Exception:
+        return _mock_locations(bbox, limit)
 
 
-async def fetch_latest_measurements(location_id: int) -> list[dict]:
-    """Fetch the latest sensor readings for a given location."""
+async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
+    """
+    Fetch the latest readings for a location and normalize to our internal shape:
+      {parameter: {name, units}, value, datetime: {utc}, coordinates: {latitude, longitude}}
+    Works with both real v3 API and mock data.
+    """
     api_key = _get_api_key()
     if not api_key:
         return _mock_measurements(location_id)
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{OPENAQ_BASE_URL}/locations/{location_id}/latest",
-            headers={"X-API-Key": api_key},
-            timeout=15.0,
-        )
-        resp.raise_for_status()
-        return resp.json().get("results", [])
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{OPENAQ_BASE_URL}/locations/{location_id}/latest",
+                headers={"X-API-Key": api_key},
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            raw = resp.json().get("results", [])
+    except Exception:
+        return _mock_measurements(location_id)
+
+    # Real v3 /latest shape: each item has a "sensors" array
+    # Normalize to our internal format
+    normalized = []
+    coords = loc.get("coordinates", {})
+    for item in raw:
+        sensors = item.get("sensors", [])
+        for sensor in sensors:
+            param = sensor.get("parameter", {})
+            param_name = param.get("name", "").lower()
+            if param_name != "pm25":
+                continue
+            normalized.append({
+                "parameter": {"name": "pm25", "units": param.get("units", "µg/m³")},
+                "value": item.get("value"),
+                "datetime": item.get("datetime", {"utc": datetime.now(timezone.utc).isoformat()}),
+                "coordinates": coords,
+            })
+    return normalized
 
 
 # ---------------------------------------------------------------------------
-# Mock data — realistic Delhi-NCR-shaped sensor network for demo/dev use
-# before an OpenAQ API key is wired in. Swap out instantly once the key
-# lands: the function signatures above already match the real API shape.
+# Mock data — realistic Delhi-NCR sensor network
 # ---------------------------------------------------------------------------
 
 _DELHI_NCR_STATIONS = [
-    {"id": 1001, "name": "Anand Vihar", "lat": 28.6469, "lng": 77.3157},
-    {"id": 1002, "name": "R K Puram", "lat": 28.5636, "lng": 77.1861},
-    {"id": 1003, "name": "Punjabi Bagh", "lat": 28.6742, "lng": 77.1310},
-    {"id": 1004, "name": "Okhla Phase 2", "lat": 28.5313, "lng": 77.2803},
-    {"id": 1005, "name": "Dwarka Sector 8", "lat": 28.5709, "lng": 77.0723},
-    {"id": 1006, "name": "Noida Sector 62", "lat": 28.6274, "lng": 77.3701},
-    {"id": 1007, "name": "Gurugram Sector 51", "lat": 28.4421, "lng": 77.0721},
-    {"id": 1008, "name": "Mandir Marg", "lat": 28.6364, "lng": 77.2007},
+    {"id": 1001, "name": "Anand Vihar",        "lat": 28.6469, "lng": 77.3157},
+    {"id": 1002, "name": "R K Puram",           "lat": 28.5636, "lng": 77.1861},
+    {"id": 1003, "name": "Punjabi Bagh",        "lat": 28.6742, "lng": 77.1310},
+    {"id": 1004, "name": "Okhla Phase 2",       "lat": 28.5313, "lng": 77.2803},
+    {"id": 1005, "name": "Dwarka Sector 8",     "lat": 28.5709, "lng": 77.0723},
+    {"id": 1006, "name": "Noida Sector 62",     "lat": 28.6274, "lng": 77.3701},
+    {"id": 1007, "name": "Gurugram Sector 51",  "lat": 28.4421, "lng": 77.0721},
+    {"id": 1008, "name": "Mandir Marg",         "lat": 28.6364, "lng": 77.2007},
 ]
 
 
@@ -89,46 +124,63 @@ def _mock_locations(bbox: str, limit: int) -> list[dict]:
 
 
 def _mock_measurements(location_id: int) -> list[dict]:
-    """
-    Generates a plausible PM2.5 reading. Seeded loosely by location_id so
-    repeated calls for the same station stay in a believable band, with
-    some stations running deliberately 'hot' to simulate a real hotspot
-    for the demo (e.g. near industrial/agri-burning zones).
-    """
+    """Generates a plausible PM2.5 reading with deterministic noise per station."""
     random.seed(location_id * 7 + int(datetime.now().minute / 10))
     hot_stations = {1001, 1006}  # Anand Vihar, Noida — classic Delhi hotspots
     base = 180 if location_id in hot_stations else 90
     pm25 = max(10, base + random.gauss(0, 25))
+    station = next((s for s in _DELHI_NCR_STATIONS if s["id"] == location_id), None)
+    coords = {"latitude": station["lat"], "longitude": station["lng"]} if station else {}
     return [{
         "parameter": {"name": "pm25", "units": "µg/m³"},
         "value": round(pm25, 1),
         "datetime": {"utc": datetime.now(timezone.utc).isoformat()},
-        "coordinates": next(
-            (s for s in _DELHI_NCR_STATIONS if s["id"] == location_id), None
-        ),
+        "coordinates": coords,
     }]
 
 
 async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
     """
-    Convenience function: fetch all stations in a bbox and their latest
-    readings, flattened into a single list of
-    {lat, lng, pm25, station_name, timestamp} dicts ready for H3 binning.
+    Fetch all stations in a bbox and their latest PM2.5 readings.
+    Returns [{lat, lng, pm25, station_name, timestamp, source}] ready for H3 binning.
+    Fetches all stations concurrently with individual error handling.
     """
     locations = await fetch_locations(bbox)
-    readings = []
-    for loc in locations:
-        measurements = await fetch_latest_measurements(loc["id"])
+
+    async def _fetch_one(loc: dict) -> list[dict]:
+        coords = loc.get("coordinates", {})
+        lat = coords.get("latitude")
+        lng = coords.get("longitude")
+        if lat is None or lng is None:
+            return []
+        measurements = await fetch_latest_measurements(loc["id"], loc)
+        results = []
         for m in measurements:
-            if m["parameter"]["name"] != "pm25":
+            param_name = m.get("parameter", {}).get("name", "")
+            if param_name != "pm25":
                 continue
-            coords = loc.get("coordinates", {})
-            readings.append({
-                "lat": coords.get("latitude"),
-                "lng": coords.get("longitude"),
-                "pm25": m["value"],
-                "station_name": loc["name"],
-                "timestamp": m["datetime"]["utc"],
+            value = m.get("value")
+            if value is None:
+                continue
+            dt = m.get("datetime", {})
+            timestamp = dt.get("utc", datetime.now(timezone.utc).isoformat())
+            results.append({
+                "lat": lat,
+                "lng": lng,
+                "pm25": float(value),
+                "station_name": loc.get("name", "Unknown"),
+                "timestamp": timestamp,
                 "source": "openaq",
             })
+        return results
+
+    # Fetch all concurrently
+    tasks = [_fetch_one(loc) for loc in locations]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    readings = []
+    for r in results:
+        if isinstance(r, list):
+            readings.extend(r)
+
     return readings

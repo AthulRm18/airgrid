@@ -51,24 +51,9 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def _train_forecast_on_startup():
-    """Pre-train the forecaster at boot so the first dashboard click on a
-    cell isn't the moment training happens — keeps the demo snappy."""
-    global _HISTORICAL_DF
-    print("Fetching real historical data from OpenAQ (14 days) for training...")
-    try:
-        _HISTORICAL_DF = await historical_data.fetch_real_history_for_bbox("76.8,28.4,77.6,28.9", days=14)
-    except Exception as e:
-        print(f"Failed to fetch real history ({e}), falling back to synthetic.")
-        _HISTORICAL_DF = None
-
-    if _HISTORICAL_DF is None or _HISTORICAL_DF.empty:
-        _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
-        
-    forecast.train(_HISTORICAL_DF)
-
-# In-memory store for the hackathon build.
+# ---------------------------------------------------------------------------
+# Global in-memory state — declared BEFORE startup event
+# ---------------------------------------------------------------------------
 CITIZEN_REPORTS: list[dict] = []
 ALERTS: dict[str, dict] = {}
 ISSUED_ALERTS: dict[str, dict] = {}
@@ -77,12 +62,26 @@ _HISTORICAL_DF = None
 _WEATHER_CACHE: dict[str, dict] = {}
 
 
+@app.on_event("startup")
+async def _train_forecast_on_startup():
+    """Train the forecast model immediately with synthetic data so the server
+    is fully ready to serve requests within seconds of boot.  The live OpenAQ
+    readings are already fetched per-request in /api/hotspots, so there is no
+    need to also pull 14 days of history at startup."""
+    global _HISTORICAL_DF
+    print("[VIGIL] Building training data...")
+    _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
+    forecast.train(_HISTORICAL_DF)
+    print("[VIGIL] Forecast model ready.")
+
+
 class CitizenReport(BaseModel):
     lat: float
     lng: float
-    text: str | None = None
-    haze_score: float | None = None
+    text: str = ""
     source: str = "text"  # "text" | "voice" | "photo"
+    haze_score: float | None = None
+    is_demo: bool = False  # skip Gemini for demo seeding speed
 
 
 class AcknowledgeIn(BaseModel):
@@ -149,11 +148,15 @@ async def get_summary():
 
 @app.post("/api/citizen-report")
 async def submit_report(report: CitizenReport):
+    import asyncio
     record = report.model_dump()
     gemini_result = None
-    if record["haze_score"] is None and report.text:
-        gemini_result = gemini_client.classify_text_report(report.text)
+    if record["haze_score"] is None and report.text and not report.is_demo:
+        # Run synchronous Gemini call in thread pool so it doesn't block the event loop
+        gemini_result = await asyncio.to_thread(gemini_client.classify_text_report, report.text)
         record["haze_score"] = gemini_result.get("haze_score", 0.5)
+    elif record["haze_score"] is None:
+        record["haze_score"] = 0.6  # default for demo reports
 
     record["id"] = str(uuid.uuid4())
     record["h3_cell"] = latlng_to_cell(report.lat, report.lng)
@@ -508,7 +511,7 @@ async def seed_demo():
     demo_reports = demo_scenario.get_demo_reports()
     seeded = []
     for r in demo_reports:
-        report = CitizenReport(lat=r["lat"], lng=r["lng"], text=r["text"], source=r["source"])
+        report = CitizenReport(lat=r["lat"], lng=r["lng"], text=r["text"], source=r["source"], is_demo=True)
         result = await submit_report(report)
         seeded.append(result)
     return {"seeded": len(seeded), "reports": seeded}

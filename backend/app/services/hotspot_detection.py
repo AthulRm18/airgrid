@@ -23,10 +23,11 @@ from enum import Enum
 
 from app.services.h3_utils import neighbors, cell_to_latlng
 
-# WHO-aligned-ish PM2.5 thresholds for demo purposes (µg/m³, 24h-ish proxy)
-PM25_MODERATE = 60
-PM25_UNHEALTHY = 120
-PM25_SEVERE = 200
+# India-realistic PM2.5 thresholds (µg/m³)
+# India NAAQS 24h standard = 60; WHO 24h target = 15 (rarely achievable in Delhi)
+PM25_MODERATE = 35    # noticeable elevated
+PM25_UNHEALTHY = 60   # India standard exceeded → CONFIRMED
+PM25_SEVERE = 120     # highly hazardous
 
 
 class Severity(str, Enum):
@@ -57,11 +58,11 @@ class HotspotCell:
 
 # --- Evidence-fusion weights (transparent, explainable) ---
 WEIGHTS = {
-    "satellite_anomaly": 0.32,
+    "satellite_anomaly": 0.24,    # Lowered slightly to balance with sensor
     "citizen_evidence": 0.24,
     "historical_deviation": 0.16,
     "weather_consistency": 0.10,
-    "sensor_evidence": 0.12,
+    "sensor_evidence": 0.20,      # Raised: ground truth is most reliable
     "coverage_uncertainty": 0.06,
 }
 
