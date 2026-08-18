@@ -25,6 +25,8 @@ Supporting:
 import uuid
 from datetime import datetime, timezone
 import os
+import asyncio
+import time
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -59,7 +61,13 @@ ALERTS: dict[str, dict] = {}
 ISSUED_ALERTS: dict[str, dict] = {}
 DISMISSED: dict[str, dict] = {}
 _HISTORICAL_DF = None
+_BASELINE_CACHE_HOURLY: dict[tuple[str, int], tuple[float, float]] = {}
+_BASELINE_CACHE_OVERALL: dict[str, tuple[float, float]] = {}
 _WEATHER_CACHE: dict[str, dict] = {}
+_SATELLITE_CACHE: dict[str, float] = {}
+_DEMO_SEEDED = False
+_HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
+_OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "20"))
 
 
 @app.on_event("startup")
@@ -68,11 +76,21 @@ async def _train_forecast_on_startup():
     is fully ready to serve requests within seconds of boot.  The live OpenAQ
     readings are already fetched per-request in /api/hotspots, so there is no
     need to also pull 14 days of history at startup."""
-    global _HISTORICAL_DF
+    global _HISTORICAL_DF, _DEMO_SEEDED
     print("[VIGIL] Building training data...")
     _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
+    _rebuild_baseline_cache(_HISTORICAL_DF)
     forecast.train(_HISTORICAL_DF)
     print("[VIGIL] Forecast model ready.")
+
+    # Auto-seed demo scenario so the dashboard is never empty on first load.
+    if os.environ.get("DEMO_AUTO_SEED", "true").lower() in ("1", "true", "yes"):
+        try:
+            result = await seed_demo()
+            _DEMO_SEEDED = True
+            print(f"[VIGIL] Demo scenario seeded ({result['seeded']} citizen reports).")
+        except Exception as exc:
+            print(f"[VIGIL] Demo auto-seed skipped: {exc}")
 
 
 class CitizenReport(BaseModel):
@@ -109,7 +127,39 @@ class DismissIn(BaseModel):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat(),
-            "product": "VIGIL", "version": "0.2.0"}
+            "product": "VIGIL", "version": "0.2.0",
+            "demo_seeded": _DEMO_SEEDED,
+            "citizen_reports": len(CITIZEN_REPORTS)}
+
+
+@app.get("/api/sensors")
+async def get_sensors(bbox: str = "76.8,28.4,77.6,28.9"):
+    """Ground sensor readings for map markers — always returns data (mock fallback)."""
+    try:
+        readings = await asyncio.wait_for(openaq_client.fetch_all_readings(bbox), timeout=_OPENAQ_ENDPOINT_TIMEOUT)
+    except Exception:
+        readings = await openaq_client._fetch_mock_readings(bbox)
+    return {
+        "count": len(readings),
+        "readings": readings,
+        "data_source": "openaq" if readings and readings[0].get("source") == "openaq" else "openaq_mock",
+    }
+
+
+@app.get("/api/data-sources")
+async def get_data_sources():
+    """Transparency panel: which integrations are live vs demo fallback."""
+    use_ee = os.environ.get("USE_EARTH_ENGINE", "false").lower() in ("1", "true", "yes")
+    has_openaq = bool(os.environ.get("OPENAQ_API_KEY"))
+    has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
+    return {
+        "openaq": "configured" if has_openaq else "mock_fallback",
+        "gemini": "configured" if has_gemini else "mock_fallback",
+        "earth_engine": "enabled" if use_ee else "mock_fallback",
+        "weather": "mock_fallback",
+        "population": "demo_estimates",
+        "demo_auto_seed": os.environ.get("DEMO_AUTO_SEED", "true"),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +169,7 @@ async def health():
 @app.get("/api/summary")
 async def get_summary():
     """KPI data for the dashboard summary cards."""
-    hotspot_data = await get_hotspots()
+    hotspot_data = await _get_hotspots_cached(max_age_seconds=12.0)
     hotspots = hotspot_data["hotspots"]
     hidden = [h for h in hotspots if h["severity"] == "hidden"]
     confirmed = [h for h in hotspots if h["severity"] == "confirmed"]
@@ -199,7 +249,10 @@ async def list_citizen_reports():
 
 @app.get("/api/hotspots")
 async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
-    sensor_readings = await openaq_client.fetch_all_readings(bbox)
+    try:
+        sensor_readings = await asyncio.wait_for(openaq_client.fetch_all_readings(bbox), timeout=_OPENAQ_ENDPOINT_TIMEOUT)
+    except Exception:
+        sensor_readings = await openaq_client._fetch_mock_readings(bbox)
     sensor_bins = bin_points(
         [{"lat": r["lat"], "lng": r["lng"], **r} for r in sensor_readings if r["lat"]]
     )
@@ -220,7 +273,7 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
         reports = citizen_bins.get(cell, [])
 
         # Historical baseline
-        baseline_mean, baseline_stddev = historical_data.get_current_baseline(df, cell)
+        baseline_mean, baseline_stddev = _get_current_baseline_fast(cell)
 
         # Weather (cached)
         weather = _WEATHER_CACHE.get(cell)
@@ -238,8 +291,18 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
 
     ranked = rank_hotspots(results)
 
-    return {
-        "count": len(ranked),
+    # Only return cells worth showing — hide noise-only unverified cells.
+    from app.services.hotspot_detection import Severity, PM25_MODERATE
+    visible = [
+        c for c in ranked
+        if c.severity != Severity.UNVERIFIED
+        or c.confidence_score >= 0.35
+        or (c.sensor_pm25 is not None and c.sensor_pm25 >= PM25_MODERATE)
+        or len(c.citizen_reports) > 0
+    ]
+
+    payload = {
+        "count": len(visible),
         "hotspots": [
             {
                 "h3_cell": c.h3_cell,
@@ -256,9 +319,12 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
                 "alert_issued": c.h3_cell in ISSUED_ALERTS,
                 "dismissed": c.h3_cell in DISMISSED,
             }
-            for c in ranked
+            for c in visible
         ],
     }
+    _HOTSPOTS_CACHE["ts"] = time.time()
+    _HOTSPOTS_CACHE["data"] = payload
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +574,9 @@ async def list_issued_alerts():
 @app.post("/api/demo/seed")
 async def seed_demo():
     """Seed the system with pre-scripted demo citizen reports."""
+    global CITIZEN_REPORTS, _SATELLITE_CACHE
+    CITIZEN_REPORTS.clear()
+    _SATELLITE_CACHE.clear()
     demo_reports = demo_scenario.get_demo_reports()
     seeded = []
     for r in demo_reports:
@@ -531,21 +600,73 @@ def _get_historical_df():
     if _HISTORICAL_DF is None:
         # Fallback if somehow not initialized
         _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
+        _rebuild_baseline_cache(_HISTORICAL_DF)
     return _HISTORICAL_DF
 
 
+def _rebuild_baseline_cache(df):
+    """Pre-compute baseline stats so hotspots can use O(1) lookups."""
+    global _BASELINE_CACHE_HOURLY, _BASELINE_CACHE_OVERALL
+    if df is None or len(df) == 0:
+        _BASELINE_CACHE_HOURLY = {}
+        _BASELINE_CACHE_OVERALL = {}
+        return
+
+    work = df[["h3_cell", "timestamp", "pm25"]].copy()
+    work["timestamp"] = historical_data.pd.to_datetime(work["timestamp"])
+    work["hour"] = work["timestamp"].dt.hour
+
+    hourly = work.groupby(["h3_cell", "hour"]) ["pm25"].agg(["mean", "std"])
+    overall = work.groupby("h3_cell")["pm25"].agg(["mean", "std"])
+
+    _BASELINE_CACHE_HOURLY = {
+        (cell, int(hour)): (
+            float(row["mean"]),
+            float(row["std"]) if not historical_data.pd.isna(row["std"]) else 1.0,
+        )
+        for (cell, hour), row in hourly.iterrows()
+    }
+
+    _BASELINE_CACHE_OVERALL = {
+        cell: (
+            float(row["mean"]),
+            float(row["std"]) if not historical_data.pd.isna(row["std"]) else 1.0,
+        )
+        for cell, row in overall.iterrows()
+    }
+
+
+def _get_current_baseline_fast(h3_cell: str) -> tuple[float | None, float | None]:
+    """Return cached mean/stddev baseline for the current UTC hour."""
+    hour = datetime.now(timezone.utc).hour
+    direct = _BASELINE_CACHE_HOURLY.get((h3_cell, hour))
+    if direct is not None:
+        return direct
+    return _BASELINE_CACHE_OVERALL.get(h3_cell, (None, None))
+
+
 def _get_satellite_score(cell: str) -> float:
-    """Tries real Earth Engine Sentinel-5P data first; falls back to the
-    deterministic mock if EE isn't configured yet."""
-    try:
-        real_score = earth_engine_client.get_aerosol_index(cell)
-        if real_score is not None:
-            return real_score
-    except RuntimeError:
-        pass
-    except Exception:
-        pass
-    return _mock_satellite_score(cell)
+    """Satellite aerosol signal — cached per cell. Earth Engine is opt-in
+    (USE_EARTH_ENGINE=true) because live EE queries take ~2s each and would
+    make /api/hotspots unusably slow for the dashboard poll loop."""
+    if cell in _SATELLITE_CACHE:
+        return _SATELLITE_CACHE[cell]
+
+    use_ee = os.environ.get("USE_EARTH_ENGINE", "false").lower() in ("1", "true", "yes")
+    score = None
+    if use_ee:
+        try:
+            score = earth_engine_client.get_aerosol_index(cell)
+        except (RuntimeError, Exception):
+            pass
+
+    if score is None:
+        score = _mock_satellite_score(cell)
+
+    # Demo blind-zone cells always get a strong satellite signal for the pitch.
+    score = max(score, demo_scenario.DEMO_SATELLITE_OVERRIDES.get(cell, 0.0))
+    _SATELLITE_CACHE[cell] = score
+    return score
 
 
 def _mock_satellite_score(cell: str) -> float:
@@ -553,3 +674,11 @@ def _mock_satellite_score(cell: str) -> float:
     import hashlib
     h = int(hashlib.sha256(cell.encode()).hexdigest(), 16)
     return (h % 100) / 100.0
+
+
+async def _get_hotspots_cached(max_age_seconds: float = 12.0):
+    cached = _HOTSPOTS_CACHE.get("data")
+    ts = float(_HOTSPOTS_CACHE.get("ts") or 0.0)
+    if cached is not None and (time.time() - ts) <= max_age_seconds:
+        return cached
+    return await get_hotspots()

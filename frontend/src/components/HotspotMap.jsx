@@ -8,9 +8,26 @@ import "leaflet/dist/leaflet.css";
 const MAP_CENTER = [28.63, 77.22];
 const MAP_ZOOM = 11;
 
+function h3Boundary(cell) {
+  try {
+    const boundary = cellToBoundary(cell);
+    return boundary.map(([lat, lng]) => [lat, lng]);
+  } catch {
+    return null;
+  }
+}
+
 export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpenEvidence }) {
   const [propagation, setPropagation] = useState(null);
   const [sensors, setSensors] = useState([]);
+
+  // Load ground sensors for map markers
+  useEffect(() => {
+    fetch("/api/sensors")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => setSensors(data?.readings ?? []))
+      .catch(() => setSensors([]));
+  }, [hotspots.length]);
 
   // Load propagation when a cell is selected
   useEffect(() => {
@@ -22,19 +39,19 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
   }, [selectedCell]);
 
   const hexPolygons = useMemo(() =>
-    hotspots.map((h) => {
-      const boundary = cellToBoundary(h.h3_cell); // returns [lat, lng]
-      const positions = boundary.map(([lat, lng]) => [lat, lng]);
-      return { ...h, positions };
+    hotspots.flatMap((h) => {
+      const positions = h3Boundary(h.h3_cell);
+      if (!positions) return [];
+      return [{ ...h, positions }];
     }), [hotspots]
   );
 
   const corridorPolygons = useMemo(() => {
     if (!propagation?.corridor) return [];
-    return propagation.corridor.map((c) => {
-      const boundary = cellToBoundary(c.h3_cell);
-      const positions = boundary.map(([lat, lng]) => [lat, lng]);
-      return { ...c, positions };
+    return propagation.corridor.flatMap((c) => {
+      const positions = h3Boundary(c.h3_cell);
+      if (!positions) return [];
+      return [{ ...c, positions }];
     });
   }, [propagation]);
 
@@ -86,6 +103,29 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
               </Polygon>
             );
           })}
+
+          {/* Ground sensor stations */}
+          {sensors.map((s) => (
+            <CircleMarker
+              key={`sensor-${s.station_name}-${s.lat}`}
+              center={[s.lat, s.lng]}
+              radius={6}
+              pathOptions={{
+                fillColor: "#4fb8ac",
+                fillOpacity: 0.9,
+                color: "#fff",
+                weight: 1.5,
+              }}
+            >
+              <LTooltip>
+                <div style={{ fontSize: 12 }}>
+                  <strong>{s.station_name}</strong><br />
+                  PM2.5: {s.pm25?.toFixed?.(1) ?? s.pm25} µg/m³<br />
+                  <span style={{ color: "#888" }}>{s.source === "openaq_mock" ? "Demo sensor data" : "OpenAQ"}</span>
+                </div>
+              </LTooltip>
+            </CircleMarker>
+          ))}
 
           {/* Hotspot hex cells */}
           {hexPolygons.map((h) => {
@@ -141,10 +181,10 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
         </MapContainer>
       </div>
 
-      {hotspots.length === 0 && (
+      {(hotspots.length === 0 && sensors.length === 0) && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <p className="text-[var(--color-mist-400)] text-sm bg-[var(--color-ink-900)]/80 px-4 py-2 rounded-lg">
-            No hotspots yet — submit a citizen report or seed demo data.
+            Loading pollution data… or click <strong>Seed demo</strong> if the backend just started.
           </p>
         </div>
       )}

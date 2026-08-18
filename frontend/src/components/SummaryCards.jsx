@@ -3,22 +3,54 @@ import {
   Activity, Eye, AlertTriangle, Users, Bell
 } from "lucide-react";
 
-export default function SummaryCards() {
+export default function SummaryCards({ backendOk }) {
   const [data, setData] = useState(null);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     const load = async () => {
       try {
         const res = await fetch("/api/summary");
-        if (res.ok) setData(await res.json());
-      } catch { /* ignore */ }
+        if (res.ok) {
+          setData(await res.json());
+          setLoadError(false);
+        } else {
+          setLoadError(true);
+        }
+      } catch {
+        setLoadError(true);
+      }
     };
     load();
     const id = setInterval(load, 10000);
     return () => clearInterval(id);
   }, []);
 
-  if (!data) return null;
+  if (loadError || backendOk === false) {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="rounded-xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] px-4 py-3 opacity-40">
+            <p className="text-xs text-[var(--color-mist-400)]">—</p>
+            <p className="text-2xl text-[var(--color-mist-400)]">—</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (!data) {
+    return (
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div key={i} className="rounded-xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] px-4 py-3 animate-pulse">
+            <div className="h-3 w-20 bg-[var(--color-ink-700)] rounded mb-2" />
+            <div className="h-7 w-10 bg-[var(--color-ink-700)] rounded" />
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   const cards = [
     {

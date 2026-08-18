@@ -66,6 +66,13 @@ DEMO_CITIZEN_REPORTS = [
 ]
 
 
+# Cells that must show a strong satellite anomaly during the demo walkthrough.
+DEMO_SATELLITE_OVERRIDES = {
+    "873da1068ffffff": 0.88,  # sensor-blind zone east of Noida
+    "873da1149ffffff": 0.72,  # Anand Vihar corridor
+}
+
+
 def get_demo_reports() -> list[dict]:
     """Return the pre-scripted citizen reports for the demo scenario."""
     return [

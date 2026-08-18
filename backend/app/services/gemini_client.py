@@ -15,7 +15,15 @@ from typing import Optional
 
 from google import genai
 
-MODEL = "gemini-2.5-flash"
+# Primary model can be overridden via GEMINI_MODEL.
+# Keep fallback list for forward compatibility with model lifecycle changes.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+MODEL_CANDIDATES = [
+    MODEL,
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+]
 
 PHOTO_PROMPT = """You are an air-quality field analyst reviewing a citizen-submitted photo.
 Analyze the visible environmental conditions.
@@ -116,6 +124,21 @@ def _parse_json(text: str) -> dict:
     return json.loads(cleaned)
 
 
+def _generate_with_fallback(client: genai.Client, contents) -> str:
+    """Try a small ordered set of models so transient deprecations don't break runtime."""
+    last_error = None
+    for model_name in MODEL_CANDIDATES:
+        try:
+            response = client.models.generate_content(model=model_name, contents=contents)
+            return response.text or ""
+        except Exception as e:
+            last_error = e
+            continue
+    if last_error:
+        raise last_error
+    raise RuntimeError("Gemini generation failed with no candidate models attempted")
+
+
 def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     client = _get_client()
     if client is None:
@@ -126,11 +149,11 @@ def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
             "notes": "GEMINI_API_KEY not set — placeholder score.",
         }
     try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=[{"inline_data": {"mime_type": mime_type, "data": image_bytes}}, PHOTO_PROMPT],
+        text = _generate_with_fallback(
+            client,
+            [{"inline_data": {"mime_type": mime_type, "data": image_bytes}}, PHOTO_PROMPT],
         )
-        return _parse_json(response.text)
+        return _parse_json(text)
     except Exception as e:
         return {
             "smoke_visible": False, "haze_visible": False,
@@ -151,10 +174,11 @@ def classify_text_report(report_text: str) -> dict:
             "extracted_location_hint": None, "confidence": 0.0,
         }
     try:
-        response = client.models.generate_content(
-            model=MODEL, contents=TEXT_PROMPT_TEMPLATE.format(report_text=report_text)
+        text = _generate_with_fallback(
+            client,
+            TEXT_PROMPT_TEMPLATE.format(report_text=report_text),
         )
-        return _parse_json(response.text)
+        return _parse_json(text)
     except Exception as e:
         return {
             "translated_text": report_text, "detected_language": "unknown",
@@ -172,11 +196,11 @@ def generate_incident_explanation(cell_data: dict) -> dict:
     if client is None:
         return _mock_incident_explanation(cell_data)
     try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=INCIDENT_EXPLANATION_PROMPT.format(data=json.dumps(cell_data))
+        text = _generate_with_fallback(
+            client,
+            INCIDENT_EXPLANATION_PROMPT.format(data=json.dumps(cell_data)),
         )
-        return _parse_json(response.text)
+        return _parse_json(text)
     except Exception:
         return _mock_incident_explanation(cell_data)
 
@@ -187,11 +211,11 @@ def generate_structured_recommendation(cell_data: dict) -> dict:
     if client is None:
         return _mock_recommendation(cell_data)
     try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=RECOMMENDATION_PROMPT.format(data=json.dumps(cell_data))
+        text = _generate_with_fallback(
+            client,
+            RECOMMENDATION_PROMPT.format(data=json.dumps(cell_data)),
         )
-        return _parse_json(response.text)
+        return _parse_json(text)
     except Exception:
         return _mock_recommendation(cell_data)
 
@@ -211,8 +235,8 @@ area, write a 2-3 sentence actionable recommendation. Be concrete —
 name the likely cause and a specific first action, don't hedge.
 
 Data: {json.dumps(cell_summary)}"""
-        response = client.models.generate_content(model=MODEL, contents=prompt)
-        return response.text.strip()
+        text = _generate_with_fallback(client, prompt)
+        return text.strip()
     except Exception:
         return "Recommendation generation temporarily unavailable."
 

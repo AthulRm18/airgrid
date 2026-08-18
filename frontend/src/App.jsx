@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { Shield, RadioTower, Loader2, Zap } from "lucide-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Shield, RadioTower, Loader2, Zap, WifiOff } from "lucide-react";
 import SummaryCards from "./components/SummaryCards";
 import HotspotMap from "./components/HotspotMap";
 import AlertQueue from "./components/AlertQueue";
@@ -15,6 +15,8 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [error, setError] = useState(null);
   const [seeding, setSeeding] = useState(false);
+  const [backendOk, setBackendOk] = useState(null);
+  const autoSeedAttempted = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -24,13 +26,31 @@ function App() {
       setHotspots(data.hotspots ?? []);
       setLastUpdated(new Date());
       setError(null);
+      setBackendOk(true);
+      return data.hotspots ?? [];
     } catch (e) {
-      setError("Can't reach the backend — is uvicorn running on :8000?");
+      setError("Backend offline — run: cd backend && uvicorn app.main:app --reload --port 8000");
+      setBackendOk(false);
+      return [];
     }
   }, []);
 
   useEffect(() => {
-    refresh();
+    async function init() {
+      const spots = await refresh();
+      // If backend is up but empty (e.g. auto-seed disabled), seed once.
+      if (spots.length === 0 && !autoSeedAttempted.current) {
+        autoSeedAttempted.current = true;
+        try {
+          const health = await fetch("/api/health");
+          if (health.ok) {
+            await fetch("/api/demo/seed", { method: "POST" });
+            await refresh();
+          }
+        } catch { /* ignore */ }
+      }
+    }
+    init();
     const id = setInterval(refresh, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [refresh]);
@@ -104,7 +124,13 @@ function App() {
 
       {/* Summary Cards */}
       <div className="px-6 pt-4">
-        <SummaryCards />
+        {backendOk === false && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-[var(--color-sev-confirmed)] bg-[rgba(224,82,74,0.1)] px-4 py-2.5 text-sm text-[var(--color-mist-200)]">
+            <WifiOff size={16} className="text-[var(--color-sev-confirmed)] shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+        <SummaryCards backendOk={backendOk} />
       </div>
 
       {/* Main content */}

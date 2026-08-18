@@ -25,12 +25,19 @@ import httpx
 
 OPENAQ_BASE_URL = "https://api.openaq.org/v3"
 
+# Fail fast during local demos: if live OpenAQ is slow/unreachable,
+# immediately fall back to deterministic mock readings.
+OPENAQ_REQUEST_TIMEOUT = float(os.environ.get("OPENAQ_REQUEST_TIMEOUT", "8"))
+OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "25"))
+OPENAQ_LOCATIONS_LIMIT = int(os.environ.get("OPENAQ_LOCATIONS_LIMIT", "25"))
+OPENAQ_MAX_CONCURRENCY = int(os.environ.get("OPENAQ_MAX_CONCURRENCY", "8"))
+
 
 def _get_api_key() -> Optional[str]:
     return os.environ.get("OPENAQ_API_KEY")
 
 
-async def fetch_locations(bbox: str, limit: int = 100) -> list[dict]:
+async def fetch_locations(bbox: str, limit: int = OPENAQ_LOCATIONS_LIMIT) -> list[dict]:
     """
     Fetch monitoring station locations within a bounding box.
     bbox: "min_lng,min_lat,max_lng,max_lat"
@@ -45,7 +52,7 @@ async def fetch_locations(bbox: str, limit: int = 100) -> list[dict]:
                 f"{OPENAQ_BASE_URL}/locations",
                 params={"bbox": bbox, "limit": limit},
                 headers={"X-API-Key": api_key},
-                timeout=15.0,
+                timeout=OPENAQ_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             return resp.json().get("results", [])
@@ -68,30 +75,47 @@ async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
             resp = await client.get(
                 f"{OPENAQ_BASE_URL}/locations/{location_id}/latest",
                 headers={"X-API-Key": api_key},
-                timeout=15.0,
+                params={"parameters_id": 2},
+                timeout=OPENAQ_REQUEST_TIMEOUT,
             )
             resp.raise_for_status()
             raw = resp.json().get("results", [])
     except Exception:
         return _mock_measurements(location_id)
 
-    # Real v3 /latest shape: each item has a "sensors" array
-    # Normalize to our internal format
+    # Normalize both known v3 shapes to internal format.
+    # Shape A (older docs): each item has a "sensors" array with parameter details.
+    # Shape B (current in production): each item has sensorsId/locationsId/value and coordinates.
     normalized = []
     coords = loc.get("coordinates", {})
     for item in raw:
         sensors = item.get("sensors", [])
-        for sensor in sensors:
-            param = sensor.get("parameter", {})
-            param_name = param.get("name", "").lower()
-            if param_name != "pm25":
-                continue
-            normalized.append({
-                "parameter": {"name": "pm25", "units": param.get("units", "µg/m³")},
-                "value": item.get("value"),
-                "datetime": item.get("datetime", {"utc": datetime.now(timezone.utc).isoformat()}),
-                "coordinates": coords,
-            })
+        if sensors:
+            for sensor in sensors:
+                param = sensor.get("parameter", {})
+                param_name = param.get("name", "").lower()
+                if param_name != "pm25":
+                    continue
+                normalized.append({
+                    "parameter": {"name": "pm25", "units": param.get("units", "µg/m³")},
+                    "value": item.get("value"),
+                    "datetime": item.get("datetime", {"utc": datetime.now(timezone.utc).isoformat()}),
+                    "coordinates": coords,
+                })
+            continue
+
+        # Current response form where parameter details are omitted.
+        if item.get("value") is None:
+            continue
+        item_coords = item.get("coordinates") or coords
+        if not item_coords:
+            continue
+        normalized.append({
+            "parameter": {"name": "pm25", "units": "µg/m³"},
+            "value": item.get("value"),
+            "datetime": item.get("datetime", {"utc": datetime.now(timezone.utc).isoformat()}),
+            "coordinates": item_coords,
+        })
     return normalized
 
 
@@ -145,7 +169,18 @@ async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
     Returns [{lat, lng, pm25, station_name, timestamp, source}] ready for H3 binning.
     Fetches all stations concurrently with individual error handling.
     """
-    locations = await fetch_locations(bbox)
+    try:
+        locations = await asyncio.wait_for(
+            fetch_locations(bbox, limit=OPENAQ_LOCATIONS_LIMIT),
+            timeout=OPENAQ_TOTAL_TIMEOUT,
+        )
+    except Exception:
+        return await _fetch_mock_readings(bbox)
+
+    if not locations:
+        return await _fetch_mock_readings(bbox)
+
+    semaphore = asyncio.Semaphore(OPENAQ_MAX_CONCURRENCY)
 
     async def _fetch_one(loc: dict) -> list[dict]:
         coords = loc.get("coordinates", {})
@@ -153,7 +188,14 @@ async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
         lng = coords.get("longitude")
         if lat is None or lng is None:
             return []
-        measurements = await fetch_latest_measurements(loc["id"], loc)
+        try:
+            async with semaphore:
+                measurements = await asyncio.wait_for(
+                    fetch_latest_measurements(loc["id"], loc),
+                    timeout=OPENAQ_REQUEST_TIMEOUT,
+                )
+        except Exception:
+            return []
         results = []
         for m in measurements:
             param_name = m.get("parameter", {}).get("name", "")
@@ -175,12 +217,51 @@ async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
         return results
 
     # Fetch all concurrently
-    tasks = [_fetch_one(loc) for loc in locations]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    tasks = [asyncio.create_task(_fetch_one(loc)) for loc in locations]
+    done, pending = await asyncio.wait(tasks, timeout=OPENAQ_TOTAL_TIMEOUT)
+
+    # Cancel and drain pending tasks so cancelled exceptions are consumed.
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+    results = []
+    for task in done:
+        try:
+            results.append(task.result())
+        except Exception:
+            results.append([])
 
     readings = []
     for r in results:
         if isinstance(r, list):
             readings.extend(r)
 
+    # If no usable live readings arrived in budget, fall back to mock so map is never blank.
+    if not readings:
+        return await _fetch_mock_readings(bbox)
+
+    return readings
+
+
+async def _fetch_mock_readings(bbox: str) -> list[dict]:
+    """Deterministic Delhi-NCR mock readings — used when no API key or live data is empty."""
+    locations = _mock_locations(bbox, limit=100)
+    readings: list[dict] = []
+    for loc in locations:
+        for m in _mock_measurements(loc["id"]):
+            coords = m.get("coordinates", {})
+            lat = coords.get("latitude")
+            lng = coords.get("longitude")
+            if lat is None or lng is None:
+                continue
+            readings.append({
+                "lat": lat,
+                "lng": lng,
+                "pm25": float(m["value"]),
+                "station_name": loc.get("name", "Unknown"),
+                "timestamp": m.get("datetime", {}).get("utc", datetime.now(timezone.utc).isoformat()),
+                "source": "openaq_mock",
+            })
     return readings
