@@ -107,14 +107,10 @@ def get_current_baseline(historical_df: pd.DataFrame, h3_cell: str) -> tuple[flo
     return mean, stddev
 
 
-async def fetch_real_history(location_id: int, date_from: str, date_to: str) -> pd.DataFrame:
+async def fetch_real_history(location_id: int, lat: float, lng: float, date_from: str, date_to: str) -> pd.DataFrame:
     """
     Real OpenAQ historical pull for one station. date_from/date_to as
     ISO date strings e.g. "2026-08-01". Needs OPENAQ_API_KEY.
-
-    Swap generate_synthetic_history() for a loop over this once you have
-    a key + want the forecast trained on real history instead of the
-    synthetic stand-in.
     """
     import os
     api_key = os.environ.get("OPENAQ_API_KEY")
@@ -136,6 +132,33 @@ async def fetch_real_history(location_id: int, date_from: str, date_to: str) -> 
             "timestamp": pd.to_datetime(r["period"]["datetimeFrom"]["utc"]),
             "pm25": r["value"],
             "location_id": location_id,
+            "h3_cell": latlng_to_cell(lat, lng, 7)
         }
         for r in results
     ])
+
+
+async def fetch_real_history_for_bbox(bbox: str, days: int = 14) -> pd.DataFrame:
+    from app.services.openaq_client import fetch_locations
+    import asyncio
+    
+    locations = await fetch_locations(bbox)
+    now = datetime.now(timezone.utc)
+    date_to = now.isoformat()
+    date_from = (now - timedelta(days=days)).isoformat()
+    
+    tasks = []
+    for loc in locations:
+        coords = loc.get("coordinates", {})
+        lat = coords.get("latitude")
+        lng = coords.get("longitude")
+        if lat is not None and lng is not None:
+            tasks.append(fetch_real_history(loc["id"], lat, lng, date_from, date_to))
+            
+    dfs = await asyncio.gather(*tasks, return_exceptions=True)
+    valid_dfs = [df for df in dfs if isinstance(df, pd.DataFrame) and not df.empty]
+    
+    if not valid_dfs:
+        return pd.DataFrame(columns=["timestamp", "pm25", "location_id", "h3_cell"])
+        
+    return pd.concat(valid_dfs, ignore_index=True)

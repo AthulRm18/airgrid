@@ -55,8 +55,18 @@ app.add_middleware(
 async def _train_forecast_on_startup():
     """Pre-train the forecaster at boot so the first dashboard click on a
     cell isn't the moment training happens — keeps the demo snappy."""
-    df = _get_historical_df()
-    forecast.train(df)
+    global _HISTORICAL_DF
+    print("Fetching real historical data from OpenAQ (14 days) for training...")
+    try:
+        _HISTORICAL_DF = await historical_data.fetch_real_history_for_bbox("76.8,28.4,77.6,28.9", days=14)
+    except Exception as e:
+        print(f"Failed to fetch real history ({e}), falling back to synthetic.")
+        _HISTORICAL_DF = None
+
+    if _HISTORICAL_DF is None or _HISTORICAL_DF.empty:
+        _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
+        
+    forecast.train(_HISTORICAL_DF)
 
 # In-memory store for the hackathon build.
 CITIZEN_REPORTS: list[dict] = []
@@ -516,6 +526,7 @@ async def get_demo_scenario():
 def _get_historical_df():
     global _HISTORICAL_DF
     if _HISTORICAL_DF is None:
+        # Fallback if somehow not initialized
         _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
     return _HISTORICAL_DF
 
