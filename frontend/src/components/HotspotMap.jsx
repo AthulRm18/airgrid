@@ -36,7 +36,8 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell }) {
 
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="w-full h-auto"
+        preserveAspectRatio="xMidYMid meet"
+        className="w-full h-[420px]"
         role="img"
         aria-label="H3 hexagon grid of detected air quality hotspots"
       >

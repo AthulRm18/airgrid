@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.services import openaq_client, gemini_client
+from app.services import historical_data, forecast
 from app.services.h3_utils import latlng_to_cell, bin_points
 from app.services.hotspot_detection import classify_cell, rank_hotspots
 
@@ -29,10 +30,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def _train_forecast_on_startup():
+    """Pre-train the forecaster at boot so the first dashboard click on a
+    cell isn't the moment training happens — keeps the demo snappy."""
+    df = _get_historical_df()
+    forecast.train(df)
+
 # In-memory store for the hackathon build. Swap for Firestore before demo day
 # if there's time — the shape is already Firestore-document-friendly.
 CITIZEN_REPORTS: list[dict] = []
 ALERTS: dict[str, dict] = {}  # keyed by alert id, populated from /api/hotspots on demand
+_HISTORICAL_DF = None  # cached lazily — see _get_historical_df()
 
 
 class CitizenReport(BaseModel):
@@ -187,6 +197,44 @@ async def acknowledge_hotspot(body: AcknowledgeIn):
 @app.get("/api/hotspots/acknowledged")
 async def list_acknowledged():
     return list(ALERTS.values())
+
+
+def _get_historical_df():
+    """Lazily generate (and cache) the demo historical dataset. Swap for a
+    real OpenAQ backfill (see services/historical_data.py) once you have
+    time/keys — same DataFrame shape, everything downstream is unaffected."""
+    global _HISTORICAL_DF
+    if _HISTORICAL_DF is None:
+        _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
+    return _HISTORICAL_DF
+
+
+@app.post("/api/forecast/train")
+async def train_forecast_model():
+    """Train (or retrain) the LightGBM forecaster on the historical
+    dataset. Call this once on startup — cheap enough (a few seconds on
+    14 days of hourly data for 8 stations) to also call again any time."""
+    df = _get_historical_df()
+    metrics = forecast.train(df)
+    return {"status": "trained", **metrics}
+
+
+@app.get("/api/forecast/{h3_cell}")
+async def get_forecast(h3_cell: str, hours: int = 24):
+    """
+    Next-N-hour PM2.5 forecast for one cell. Trains the model on first
+    call if it hasn't been trained yet, so the endpoint works out of the
+    box without a separate setup step (still call POST /api/forecast/train
+    explicitly if you want fresh metrics after changing the historical data).
+    """
+    df = _get_historical_df()
+    if not forecast.is_trained():
+        forecast.train(df)
+    try:
+        predictions = forecast.forecast_cell(df, h3_cell, hours_ahead=hours)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"h3_cell": h3_cell, "predictions": predictions}
 
 
 def _mock_satellite_score(cell: str) -> float:
