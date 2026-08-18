@@ -15,6 +15,7 @@ monitoring misses — and forecast spikes before they happen.
 ✅ Gemini text classification + photo scoring wired in (`services/gemini_client.py`) — falls back to a clearly-labeled placeholder score if `GEMINI_API_KEY` isn't set yet, so nobody's blocked
 ✅ Alert acknowledge loop (`POST /api/hotspots/acknowledge`) — closes Detect → Recommend → Notify → Acknowledge
 ✅ React dashboard — hex-grid map (SVG, real H3 boundaries), authority alert queue with acknowledge flow, citizen report panel (text + photo), all wired to the live backend
+✅ BRICS federation API layer — country-aware reporting, federated hotspot import/export, shared-model registry, resource-coordination requests
 ⬜ Earth Engine Sentinel-5P satellite integration (currently mocked deterministically per H3 cell)
 ⬜ LightGBM forecasting model
 ⬜ Cloud Run deployment
@@ -42,6 +43,17 @@ curl http://127.0.0.1:8000/api/hotspots
 curl -X POST http://127.0.0.1:8000/api/hotspots/acknowledge \
   -H "Content-Type: application/json" \
   -d '{"h3_cell": "873da1149ffffff", "action_taken": "dispatched field team"}'
+
+# BRICS federation status
+curl http://127.0.0.1:8000/api/brics/status
+
+# Export local hotspots in BRICS interoperable schema
+curl http://127.0.0.1:8000/api/brics/hotspots/export
+
+# Import partner hotspot event
+curl -X POST http://127.0.0.1:8000/api/brics/hotspots/import \
+  -H "Content-Type: application/json" \
+  -d '[{"origin_country":"BR","h3_cell":"89c2e3192b7ffff","lat":-23.55,"lng":-46.63,"severity":"hidden","confidence_score":0.78}]'
 ```
 
 Or skip curl entirely — run the server, then open http://127.0.0.1:8000/docs
@@ -78,6 +90,21 @@ Three pieces:
 - **Earth Engine**: needs a Google Cloud project + Earth Engine registration
   (https://code.earthengine.google.com/register) — this one takes longest to
   approve, so register it TODAY even before you write the integration code.
+- **BRICS country mode**: set `LOCAL_COUNTRY_CODE` in `backend/.env`
+  to one of `IN`, `BR`, `RU`, `CN`, `ZA` (defaults to `IN`).
+
+## BRICS federation endpoints
+
+Use these APIs to exchange events and model metadata across BRICS nodes:
+
+- `GET /api/brics/status`
+- `GET /api/brics/hotspots/export`
+- `POST /api/brics/hotspots/import`
+- `GET /api/brics/hotspots/federated`
+- `POST /api/brics/models/share`
+- `GET /api/brics/models`
+- `POST /api/brics/resources/request`
+- `GET /api/brics/resources/requests`
 
 ## Architecture
 

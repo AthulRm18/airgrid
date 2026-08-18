@@ -23,6 +23,7 @@ export default function ReportPanel({ onReportSubmitted }) {
   const [isRecording, setIsRecording] = useState(false);
   const [offlineQueue, setOfflineQueue] = useState([]);
   const [simulateOffline, setSimulateOffline] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
@@ -36,18 +37,29 @@ export default function ReportPanel({ onReportSubmitted }) {
     }
 
     setSubmitting(true);
+    setSubmitError("");
     setLastResult(null);
     const { lat, lng } = randomPointInBbox();
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
       const res = await fetch("/api/citizen-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lat, lng, text: text.trim(), source: "text" }),
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Report submit failed (${res.status}): ${errText}`);
+      }
       const data = await res.json();
       setLastResult(data);
       setText("");
       onReportSubmitted();
+    } catch (err) {
+      setSubmitError(err?.message || "Could not submit report. Please retry.");
     } finally {
       setSubmitting(false);
     }
@@ -56,6 +68,7 @@ export default function ReportPanel({ onReportSubmitted }) {
   async function submitPhoto() {
     if (!photo) return;
     setSubmitting(true);
+    setSubmitError("");
     setLastResult(null);
     const { lat, lng } = randomPointInBbox();
     const form = new FormData();
@@ -63,11 +76,20 @@ export default function ReportPanel({ onReportSubmitted }) {
     form.append("lng", lng);
     form.append("file", photo);
     try {
-      const res = await fetch("/api/citizen-report/photo", { method: "POST", body: form });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      const res = await fetch("/api/citizen-report/photo", { method: "POST", body: form, signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Photo submit failed (${res.status}): ${errText}`);
+      }
       const data = await res.json();
       setLastResult(data);
       setPhoto(null);
       onReportSubmitted();
+    } catch (err) {
+      setSubmitError(err?.message || "Could not submit photo report. Please retry.");
     } finally {
       setSubmitting(false);
     }
@@ -206,6 +228,10 @@ export default function ReportPanel({ onReportSubmitted }) {
             </div>
           ))}
         </div>
+      )}
+
+      {submitError && (
+        <p className="mt-3 text-xs text-[var(--color-sev-confirmed)]">{submitError}</p>
       )}
 
       {lastResult && <ResultPreview result={lastResult} />}

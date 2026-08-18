@@ -5,18 +5,53 @@ import {
 } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 
+const EVIDENCE_FETCH_TIMEOUT_MS = 50000;
+
+async function fetchEvidenceWithRetry(h3Cell, attempts = 1) {
+  let lastError = null;
+  for (let i = 0; i < attempts; i += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), EVIDENCE_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`/api/hotspots/${h3Cell}/evidence`, { signal: controller.signal });
+      if (!res.ok) {
+        throw new Error(`status ${res.status}`);
+      }
+      return await res.json();
+    } catch (err) {
+      lastError = err;
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+  throw lastError || new Error("Failed to load evidence");
+}
+
 export default function EvidencePanel({ h3Cell, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!h3Cell) return;
+    let cancelled = false;
     setLoading(true);
-    fetch(`/api/hotspots/${h3Cell}/evidence`)
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+    fetchEvidenceWithRetry(h3Cell)
+      .then((payload) => {
+        if (!cancelled) setData(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [h3Cell]);
 
   if (!h3Cell) return null;

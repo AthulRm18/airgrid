@@ -11,19 +11,26 @@ Falls back to clearly-labeled heuristic scores if no key is set.
 """
 import json
 import os
+from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from google import genai
 
+# Ensure backend .env is loaded even when this module is imported outside app.main.
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(_BACKEND_ROOT / ".env")
+
 # Primary model can be overridden via GEMINI_MODEL.
-# Keep fallback list for forward compatibility with model lifecycle changes.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+# Keep a fallback list with broadly-available model IDs.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 MODEL_CANDIDATES = [
     MODEL,
-    "gemini-3.6-flash",
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-1.5-flash",
 ]
+_DISCOVERED_MODELS: list[str] = []
 
 PHOTO_PROMPT = """You are an air-quality field analyst reviewing a citizen-submitted photo.
 Analyze the visible environmental conditions.
@@ -111,7 +118,9 @@ Incident data: {data}"""
 
 
 def _get_client() -> Optional[genai.Client]:
-    key = os.environ.get("GEMINI_API_KEY")
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if key:
+        key = key.strip().strip('"').strip("'")
     if not key:
         return None
     return genai.Client(api_key=key)
@@ -124,10 +133,32 @@ def _parse_json(text: str) -> dict:
     return json.loads(cleaned)
 
 
+def _candidate_models(client: genai.Client) -> list[str]:
+    if _DISCOVERED_MODELS:
+        return list(dict.fromkeys(MODEL_CANDIDATES + _DISCOVERED_MODELS))
+
+    discovered: list[str] = []
+    try:
+        for model in client.models.list():
+            name = getattr(model, "name", "") or ""
+            short_name = name.split("/", 1)[-1] if name.startswith("models/") else name
+            if "gemini" not in short_name:
+                continue
+            if "flash" in short_name or "pro" in short_name:
+                discovered.append(short_name)
+            if len(discovered) >= 8:
+                break
+    except Exception:
+        discovered = []
+
+    _DISCOVERED_MODELS.extend(discovered)
+    return list(dict.fromkeys(MODEL_CANDIDATES + discovered))
+
+
 def _generate_with_fallback(client: genai.Client, contents) -> str:
     """Try a small ordered set of models so transient deprecations don't break runtime."""
     last_error = None
-    for model_name in MODEL_CANDIDATES:
+    for model_name in _candidate_models(client):
         try:
             response = client.models.generate_content(model=model_name, contents=contents)
             return response.text or ""
@@ -194,30 +225,30 @@ def generate_incident_explanation(cell_data: dict) -> dict:
     """Generate a structured incident explanation from fused evidence."""
     client = _get_client()
     if client is None:
-        return _mock_incident_explanation(cell_data)
+        return _mock_incident_explanation(cell_data, fallback_reason="missing_api_key")
     try:
         text = _generate_with_fallback(
             client,
             INCIDENT_EXPLANATION_PROMPT.format(data=json.dumps(cell_data)),
         )
         return _parse_json(text)
-    except Exception:
-        return _mock_incident_explanation(cell_data)
+    except Exception as e:
+        return _mock_incident_explanation(cell_data, fallback_reason=f"gemini_error: {str(e)[:120]}")
 
 
 def generate_structured_recommendation(cell_data: dict) -> dict:
     """Generate a structured recommendation from incident data."""
     client = _get_client()
     if client is None:
-        return _mock_recommendation(cell_data)
+        return _mock_recommendation(cell_data, fallback_reason="missing_api_key")
     try:
         text = _generate_with_fallback(
             client,
             RECOMMENDATION_PROMPT.format(data=json.dumps(cell_data)),
         )
         return _parse_json(text)
-    except Exception:
-        return _mock_recommendation(cell_data)
+    except Exception as e:
+        return _mock_recommendation(cell_data, fallback_reason=f"gemini_error: {str(e)[:120]}")
 
 
 def generate_authority_recommendation(cell_summary: dict) -> str:
@@ -241,9 +272,13 @@ Data: {json.dumps(cell_summary)}"""
         return "Recommendation generation temporarily unavailable."
 
 
-def _mock_incident_explanation(cell_data: dict) -> dict:
+def _mock_incident_explanation(cell_data: dict, fallback_reason: str = "missing_api_key") -> dict:
     severity = cell_data.get("severity", "unverified")
     confidence = cell_data.get("confidence_score", 0)
+    if fallback_reason == "missing_api_key":
+        note = "Gemini API key missing - using template explanation."
+    else:
+        note = f"Gemini temporarily unavailable - using template explanation ({fallback_reason})."
     return {
         "incident_title": f"Pollution Event — H3 {cell_data.get('h3_cell', 'unknown')[:12]}",
         "severity_assessment": "HIGH" if confidence > 0.7 else "MODERATE",
@@ -258,11 +293,15 @@ def _mock_incident_explanation(cell_data: dict) -> dict:
             f"Sensor PM2.5: {cell_data.get('sensor_pm25', 'No sensor')} µg/m³",
         ],
         "likely_cause": "Under investigation",
-        "confidence_note": "Gemini not configured — this is a template explanation.",
+        "confidence_note": note,
     }
 
 
-def _mock_recommendation(cell_data: dict) -> dict:
+def _mock_recommendation(cell_data: dict, fallback_reason: str = "missing_api_key") -> dict:
+    if fallback_reason == "missing_api_key":
+        note = "Gemini API key missing - using template recommendation."
+    else:
+        note = f"Gemini temporarily unavailable - using template recommendation ({fallback_reason})."
     return {
         "urgency": "WITHIN_1_HOUR",
         "actions": [
@@ -275,4 +314,5 @@ def _mock_recommendation(cell_data: dict) -> dict:
         "monitoring_recommendations": "Track wind direction changes and monitor neighboring cells for pollution spread.",
         "public_advisory_needed": True,
         "advisory_text": "Elevated air pollution levels detected in your area. Minimize outdoor activity. Close windows. Wear masks if going outside.",
+        "fallback_note": note,
     }

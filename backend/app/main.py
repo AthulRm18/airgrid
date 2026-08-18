@@ -23,17 +23,20 @@ Supporting:
     GET  /api/demo/scenario          demo scenario description
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 import asyncio
 import time
+from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(_BACKEND_ROOT / ".env")
+load_dotenv(_BACKEND_ROOT.parent / ".env")
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from app.services import openaq_client, gemini_client
 from app.services import historical_data, forecast, earth_engine_client
@@ -41,6 +44,11 @@ from app.services import weather_client, impact_engine, demo_scenario
 from app.services.propagation import compute_propagation_corridor
 from app.services.h3_utils import latlng_to_cell, bin_points
 from app.services.hotspot_detection import classify_cell, rank_hotspots
+
+BRICS_COUNTRIES = {"BR", "RU", "IN", "CN", "ZA"}
+LOCAL_COUNTRY = os.environ.get("LOCAL_COUNTRY_CODE", "IN").strip().upper()
+if LOCAL_COUNTRY not in BRICS_COUNTRIES:
+    LOCAL_COUNTRY = "IN"
 
 app = FastAPI(title="VIGIL API", version="0.2.0",
               description="Environmental intelligence before exposure.")
@@ -60,6 +68,9 @@ CITIZEN_REPORTS: list[dict] = []
 ALERTS: dict[str, dict] = {}
 ISSUED_ALERTS: dict[str, dict] = {}
 DISMISSED: dict[str, dict] = {}
+FEDERATED_EVENTS: list[dict] = []
+FEDERATED_MODEL_REGISTRY: dict[str, dict] = {}
+RESOURCE_COORDINATION_REQUESTS: list[dict] = []
 _HISTORICAL_DF = None
 _BASELINE_CACHE_HOURLY: dict[tuple[str, int], tuple[float, float]] = {}
 _BASELINE_CACHE_OVERALL: dict[str, tuple[float, float]] = {}
@@ -67,7 +78,10 @@ _WEATHER_CACHE: dict[str, dict] = {}
 _SATELLITE_CACHE: dict[str, float] = {}
 _DEMO_SEEDED = False
 _HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
-_OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "20"))
+_EVIDENCE_CACHE: dict[str, dict] = {}
+_OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "70"))
+_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "20"))
+_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "45"))
 
 
 @app.on_event("startup")
@@ -83,6 +97,14 @@ async def _train_forecast_on_startup():
     forecast.train(_HISTORICAL_DF)
     print("[VIGIL] Forecast model ready.")
 
+    # Prime sensor cache early so dashboard's first load can use real readings.
+    try:
+        seeded_readings = await openaq_client.fetch_all_readings("76.8,28.4,77.6,28.9")
+        source = seeded_readings[0].get("source") if seeded_readings else "none"
+        print(f"[VIGIL] Sensor cache primed ({len(seeded_readings)} readings, source={source}).")
+    except Exception as exc:
+        print(f"[VIGIL] Sensor cache prime skipped: {exc}")
+
     # Auto-seed demo scenario so the dashboard is never empty on first load.
     if os.environ.get("DEMO_AUTO_SEED", "true").lower() in ("1", "true", "yes"):
         try:
@@ -95,11 +117,28 @@ async def _train_forecast_on_startup():
 
 class CitizenReport(BaseModel):
     lat: float
-    lng: float
+    lng: float | None = None
+    lon: float | None = None
     text: str = ""
     source: str = "text"  # "text" | "voice" | "photo"
     haze_score: float | None = None
     is_demo: bool = False  # skip Gemini for demo seeding speed
+    country_code: str | None = None
+
+    @model_validator(mode="after")
+    def _normalize_coordinates(self):
+        # Accept both lng and lon from different clients.
+        if self.lng is None and self.lon is None:
+            raise ValueError("Either 'lng' or 'lon' is required")
+        if self.lng is None:
+            self.lng = self.lon
+        if self.country_code is None:
+            self.country_code = LOCAL_COUNTRY
+        else:
+            self.country_code = str(self.country_code).strip().upper()
+        if self.country_code not in BRICS_COUNTRIES:
+            raise ValueError(f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
+        return self
 
 
 class AcknowledgeIn(BaseModel):
@@ -120,6 +159,61 @@ class DismissIn(BaseModel):
     reason: str
 
 
+class FederatedEventIn(BaseModel):
+    origin_country: str
+    h3_cell: str
+    lat: float
+    lng: float
+    severity: str
+    confidence_score: float
+    timestamp: str | None = None
+    evidence_summary: str | None = None
+    source_system: str = "VIGIL"
+
+    @model_validator(mode="after")
+    def _normalize_country(self):
+        self.origin_country = str(self.origin_country).strip().upper()
+        if self.origin_country not in BRICS_COUNTRIES:
+            raise ValueError(f"origin_country must be one of {sorted(BRICS_COUNTRIES)}")
+        return self
+
+
+class ModelShareIn(BaseModel):
+    origin_country: str
+    model_name: str
+    model_version: str
+    target_variable: str = "pm25"
+    horizon_hours: int = 24
+    training_window_days: int = 14
+    metrics: dict = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
+    artifact_uri: str | None = None
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _normalize_country(self):
+        self.origin_country = str(self.origin_country).strip().upper()
+        if self.origin_country not in BRICS_COUNTRIES:
+            raise ValueError(f"origin_country must be one of {sorted(BRICS_COUNTRIES)}")
+        return self
+
+
+class ResourceCoordinationRequestIn(BaseModel):
+    country_code: str
+    request_type: str
+    reason: str
+    requested_for_h3_cell: str | None = None
+    priority: str = "normal"
+    resources_needed: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _normalize_country(self):
+        self.country_code = str(self.country_code).strip().upper()
+        if self.country_code not in BRICS_COUNTRIES:
+            raise ValueError(f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
@@ -128,6 +222,7 @@ class DismissIn(BaseModel):
 async def health():
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat(),
             "product": "VIGIL", "version": "0.2.0",
+            "local_country": LOCAL_COUNTRY,
             "demo_seeded": _DEMO_SEEDED,
             "citizen_reports": len(CITIZEN_REPORTS)}
 
@@ -153,6 +248,8 @@ async def get_data_sources():
     has_openaq = bool(os.environ.get("OPENAQ_API_KEY"))
     has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
     return {
+        "local_country": LOCAL_COUNTRY,
+        "brics_mode": "enabled",
         "openaq": "configured" if has_openaq else "mock_fallback",
         "gemini": "configured" if has_gemini else "mock_fallback",
         "earth_engine": "enabled" if use_ee else "mock_fallback",
@@ -210,17 +307,23 @@ async def submit_report(report: CitizenReport):
 
     record["id"] = str(uuid.uuid4())
     record["h3_cell"] = latlng_to_cell(report.lat, report.lng)
+    record["country_code"] = report.country_code
     record["submitted_at"] = datetime.now(timezone.utc).isoformat()
     record["synced"] = True
     record["gemini_classification"] = gemini_result
     CITIZEN_REPORTS.append(record)
+    _invalidate_runtime_caches(clear_satellite=False)
     return record
 
 
 @app.post("/api/citizen-report/photo")
 async def submit_photo_report(
-    lat: float = Form(...), lng: float = Form(...), file: UploadFile = File(...)
+    lat: float = Form(...), lng: float = Form(...), file: UploadFile = File(...),
+    country_code: str = Form(LOCAL_COUNTRY),
 ):
+    country_code = str(country_code).strip().upper()
+    if country_code not in BRICS_COUNTRIES:
+        raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
     image_bytes = await file.read()
     scoring = gemini_client.score_photo(image_bytes, mime_type=file.content_type or "image/jpeg")
 
@@ -228,6 +331,7 @@ async def submit_photo_report(
         "id": str(uuid.uuid4()),
         "lat": lat, "lng": lng,
         "h3_cell": latlng_to_cell(lat, lng),
+        "country_code": country_code,
         "source": "photo",
         "haze_score": scoring.get("haze_score", 0.5),
         "gemini_classification": scoring,
@@ -235,6 +339,7 @@ async def submit_photo_report(
         "synced": True,
     }
     CITIZEN_REPORTS.append(record)
+    _invalidate_runtime_caches(clear_satellite=False)
     return record
 
 
@@ -263,6 +368,7 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
     df = _get_historical_df()
 
     results = []
+    cell_country_map: dict[str, str] = {}
     for cell in all_cells:
         sensor_pm25 = None
         if cell in sensor_bins:
@@ -271,6 +377,12 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
         satellite_anomaly_score = _get_satellite_score(cell)
 
         reports = citizen_bins.get(cell, [])
+        report_countries = [
+            str(r.get("country_code", LOCAL_COUNTRY)).strip().upper()
+            for r in reports
+            if str(r.get("country_code", LOCAL_COUNTRY)).strip().upper() in BRICS_COUNTRIES
+        ]
+        dominant_country = max(set(report_countries), key=report_countries.count) if report_countries else LOCAL_COUNTRY
 
         # Historical baseline
         baseline_mean, baseline_stddev = _get_current_baseline_fast(cell)
@@ -288,6 +400,7 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
             weather_data=weather,
         )
         results.append(classified)
+        cell_country_map[cell] = dominant_country
 
     ranked = rank_hotspots(results)
 
@@ -312,6 +425,7 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
                 "aqi_estimate": c.aqi_estimate,
                 "sensor_pm25": c.sensor_pm25,
                 "citizen_report_count": len(c.citizen_reports),
+                "country_code": cell_country_map.get(c.h3_cell, LOCAL_COUNTRY),
                 "explanation": c.explanation,
                 "confidence_score": c.confidence_score,
                 "evidence_breakdown": c.evidence_breakdown,
@@ -333,106 +447,7 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
 
 @app.get("/api/hotspots/{h3_cell}/evidence")
 async def get_evidence(h3_cell: str):
-    hotspots = await get_hotspots()
-    match = next((h for h in hotspots["hotspots"] if h["h3_cell"] == h3_cell), None)
-    if match is None:
-        raise HTTPException(status_code=404, detail="cell not currently a hotspot")
-
-    # Get impact
-    impact = impact_engine.compute_impact_score(h3_cell, match.get("confidence_score", 0))
-
-    # Get weather
-    weather = await weather_client.fetch_weather(h3_cell)
-
-    # Get propagation corridor
-    corridor = compute_propagation_corridor(
-        h3_cell,
-        weather["wind_direction_deg"],
-        weather["wind_speed_kmh"],
-        match.get("confidence_score", 0.5),
-    )
-    corridor_impact = impact_engine.compute_corridor_impact(corridor, match.get("confidence_score", 0.5))
-
-    # Get forecast
-    df = _get_historical_df()
-    forecast_data = None
-    try:
-        if not forecast.is_trained():
-            forecast.train(df)
-        forecast_data = forecast.forecast_cell(df, h3_cell, hours_ahead=12)
-    except (ValueError, RuntimeError):
-        pass
-
-    # Spike detection from forecast
-    spike_info = None
-    if forecast_data:
-        from app.services.hotspot_detection import PM25_UNHEALTHY
-        for pred in forecast_data:
-            if pred["predicted_pm25"] >= PM25_UNHEALTHY:
-                spike_info = {
-                    "threshold": PM25_UNHEALTHY,
-                    "predicted_value": pred["predicted_pm25"],
-                    "hours_until": round((
-                        datetime.fromisoformat(pred["timestamp"]) - datetime.now(timezone.utc)
-                    ).total_seconds() / 3600, 1),
-                    "timestamp": pred["timestamp"],
-                }
-                break
-
-    # Gemini structured explanation
-    explanation_data = {**match, "weather": weather, "impact": impact}
-    incident_explanation = gemini_client.generate_incident_explanation(explanation_data)
-
-    # Gemini structured recommendation
-    rec_data = {**match, "weather": weather, "impact": impact, "corridor_impact": corridor_impact, "forecast_spike": spike_info}
-    recommendation = gemini_client.generate_structured_recommendation(rec_data)
-
-    # Evidence checklist
-    eb = match.get("evidence_breakdown", {})
-    evidence_checklist = []
-    if eb.get("satellite_anomaly", {}).get("signal_strength", 0) > 0.3:
-        evidence_checklist.append({"check": "Satellite anomaly detected", "active": True})
-    else:
-        evidence_checklist.append({"check": "Satellite anomaly detected", "active": False})
-
-    citizen_count = match.get("citizen_report_count", 0)
-    if citizen_count > 0:
-        evidence_checklist.append({"check": f"{citizen_count} citizen report{'s' if citizen_count != 1 else ''} in this zone", "active": True})
-    else:
-        evidence_checklist.append({"check": "Citizen reports in this zone", "active": False})
-
-    if eb.get("historical_deviation", {}).get("signal_strength", 0) > 0.3:
-        evidence_checklist.append({"check": "Historical baseline exceeded", "active": True})
-    else:
-        evidence_checklist.append({"check": "Historical baseline exceeded", "active": False})
-
-    if eb.get("weather_consistency", {}).get("signal_strength", 0) > 0.4:
-        evidence_checklist.append({"check": "Wind direction consistent with spread", "active": True})
-    else:
-        evidence_checklist.append({"check": "Wind direction consistent with spread", "active": False})
-
-    if eb.get("coverage_uncertainty", {}).get("signal_strength", 0) > 0.5:
-        evidence_checklist.append({"check": "Insufficient official sensor coverage", "active": True})
-    else:
-        evidence_checklist.append({"check": "Sufficient official sensor coverage", "active": True})
-
-    if eb.get("sensor_evidence", {}).get("signal_strength", 0) > 0.3:
-        evidence_checklist.append({"check": "Nearby sensor confirms elevated levels", "active": True})
-    else:
-        evidence_checklist.append({"check": "Nearby sensor data does not yet show equivalent severity", "active": match.get("severity") == "hidden"})
-
-    return {
-        **match,
-        "weather": weather,
-        "impact": impact,
-        "corridor": corridor,
-        "corridor_impact": corridor_impact,
-        "forecast": forecast_data,
-        "spike_info": spike_info,
-        "incident_explanation": incident_explanation,
-        "recommendation": recommendation,
-        "evidence_checklist": evidence_checklist,
-    }
+    return await _get_evidence_cached(h3_cell, max_age_seconds=_EVIDENCE_CACHE_TTL_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -532,6 +547,7 @@ async def acknowledge_hotspot(body: AcknowledgeIn):
         "officer_name": body.officer_name,
         "acknowledged_at": datetime.now(timezone.utc).isoformat(),
     }
+    _invalidate_runtime_caches(clear_satellite=False)
     return ALERTS[body.h3_cell]
 
 
@@ -544,6 +560,7 @@ async def issue_alert(body: AlertIssueIn):
         "officer_name": body.officer_name,
         "issued_at": datetime.now(timezone.utc).isoformat(),
     }
+    _invalidate_runtime_caches(clear_satellite=False)
     return ISSUED_ALERTS[body.h3_cell]
 
 
@@ -554,6 +571,7 @@ async def dismiss_alert(body: DismissIn):
         "reason": body.reason,
         "dismissed_at": datetime.now(timezone.utc).isoformat(),
     }
+    _invalidate_runtime_caches(clear_satellite=False)
     return DISMISSED[body.h3_cell]
 
 
@@ -568,6 +586,159 @@ async def list_issued_alerts():
 
 
 # ---------------------------------------------------------------------------
+# BRICS federation and interoperability
+# ---------------------------------------------------------------------------
+
+@app.get("/api/brics/status")
+async def brics_status():
+    return {
+        "local_country": LOCAL_COUNTRY,
+        "member_countries": sorted(BRICS_COUNTRIES),
+        "federated_events_received": len(FEDERATED_EVENTS),
+        "shared_models": len(FEDERATED_MODEL_REGISTRY),
+        "resource_requests": len(RESOURCE_COORDINATION_REQUESTS),
+    }
+
+
+@app.get("/api/brics/hotspots/export")
+async def export_brics_hotspots(min_confidence: float = 0.4):
+    hotspots = await _get_hotspots_cached(max_age_seconds=10.0)
+    exported = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for h in hotspots["hotspots"]:
+        if h.get("confidence_score", 0.0) < min_confidence:
+            continue
+        exported.append({
+            "schema_version": "brics.v1",
+            "origin_country": h.get("country_code", LOCAL_COUNTRY),
+            "producer": "VIGIL",
+            "h3_cell": h["h3_cell"],
+            "lat": h["lat"],
+            "lng": h["lng"],
+            "severity": h["severity"],
+            "confidence_score": h.get("confidence_score", 0.0),
+            "sensor_pm25": h.get("sensor_pm25"),
+            "citizen_report_count": h.get("citizen_report_count", 0),
+            "evidence_breakdown": h.get("evidence_breakdown", {}),
+            "published_at": now_iso,
+        })
+    return {
+        "schema": "brics.v1",
+        "origin_country": LOCAL_COUNTRY,
+        "count": len(exported),
+        "events": exported,
+    }
+
+
+@app.post("/api/brics/hotspots/import")
+async def import_brics_hotspots(payload: list[FederatedEventIn]):
+    accepted = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for event in payload:
+        dedupe_key = f"{event.origin_country}:{event.h3_cell}:{event.timestamp or now_iso}"
+        if any(e.get("dedupe_key") == dedupe_key for e in FEDERATED_EVENTS):
+            continue
+        FEDERATED_EVENTS.append({
+            "dedupe_key": dedupe_key,
+            "schema_version": "brics.v1",
+            "origin_country": event.origin_country,
+            "h3_cell": event.h3_cell,
+            "lat": event.lat,
+            "lng": event.lng,
+            "severity": event.severity,
+            "confidence_score": event.confidence_score,
+            "timestamp": event.timestamp or now_iso,
+            "evidence_summary": event.evidence_summary,
+            "source_system": event.source_system,
+            "ingested_at": now_iso,
+        })
+        accepted += 1
+
+    FEDERATED_EVENTS.sort(key=lambda e: e.get("timestamp", ""), reverse=True)
+    del FEDERATED_EVENTS[500:]
+    return {"accepted": accepted, "total_stored": len(FEDERATED_EVENTS)}
+
+
+@app.get("/api/brics/hotspots/federated")
+async def list_federated_hotspots(country_code: str | None = None, min_confidence: float = 0.35):
+    normalized_country = None
+    if country_code is not None:
+        normalized_country = str(country_code).strip().upper()
+        if normalized_country not in BRICS_COUNTRIES:
+            raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
+
+    items = [
+        e for e in FEDERATED_EVENTS
+        if e.get("confidence_score", 0.0) >= min_confidence
+        and (normalized_country is None or e.get("origin_country") == normalized_country)
+    ]
+    return {
+        "count": len(items),
+        "events": items[:200],
+    }
+
+
+@app.post("/api/brics/models/share")
+async def share_model(payload: ModelShareIn):
+    model_id = f"{payload.origin_country}:{payload.model_name}:{payload.model_version}"
+    FEDERATED_MODEL_REGISTRY[model_id] = {
+        "model_id": model_id,
+        "origin_country": payload.origin_country,
+        "model_name": payload.model_name,
+        "model_version": payload.model_version,
+        "target_variable": payload.target_variable,
+        "horizon_hours": payload.horizon_hours,
+        "training_window_days": payload.training_window_days,
+        "metrics": payload.metrics,
+        "tags": payload.tags,
+        "artifact_uri": payload.artifact_uri,
+        "notes": payload.notes,
+        "shared_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return FEDERATED_MODEL_REGISTRY[model_id]
+
+
+@app.get("/api/brics/models")
+async def list_shared_models(target_variable: str | None = None):
+    items = list(FEDERATED_MODEL_REGISTRY.values())
+    if target_variable:
+        target_variable = target_variable.strip().lower()
+        items = [m for m in items if str(m.get("target_variable", "")).lower() == target_variable]
+    items.sort(key=lambda m: m.get("shared_at", ""), reverse=True)
+    return {"count": len(items), "models": items}
+
+
+@app.post("/api/brics/resources/request")
+async def request_brics_resource(payload: ResourceCoordinationRequestIn):
+    record = {
+        "id": str(uuid.uuid4()),
+        "country_code": payload.country_code,
+        "request_type": payload.request_type,
+        "reason": payload.reason,
+        "requested_for_h3_cell": payload.requested_for_h3_cell,
+        "priority": payload.priority,
+        "resources_needed": payload.resources_needed,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": "open",
+    }
+    RESOURCE_COORDINATION_REQUESTS.append(record)
+    RESOURCE_COORDINATION_REQUESTS.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+    del RESOURCE_COORDINATION_REQUESTS[300:]
+    return record
+
+
+@app.get("/api/brics/resources/requests")
+async def list_brics_resource_requests(country_code: str | None = None):
+    items = RESOURCE_COORDINATION_REQUESTS
+    if country_code:
+        normalized = country_code.strip().upper()
+        if normalized not in BRICS_COUNTRIES:
+            raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
+        items = [r for r in items if r.get("country_code") == normalized]
+    return {"count": len(items), "requests": items}
+
+
+# ---------------------------------------------------------------------------
 # Demo scenario
 # ---------------------------------------------------------------------------
 
@@ -577,6 +748,7 @@ async def seed_demo():
     global CITIZEN_REPORTS, _SATELLITE_CACHE
     CITIZEN_REPORTS.clear()
     _SATELLITE_CACHE.clear()
+    _invalidate_runtime_caches(clear_satellite=False)
     demo_reports = demo_scenario.get_demo_reports()
     seeded = []
     for r in demo_reports:
@@ -682,3 +854,192 @@ async def _get_hotspots_cached(max_age_seconds: float = 12.0):
     if cached is not None and (time.time() - ts) <= max_age_seconds:
         return cached
     return await get_hotspots()
+
+
+def _invalidate_runtime_caches(clear_satellite: bool = False):
+    _HOTSPOTS_CACHE["ts"] = 0.0
+    _HOTSPOTS_CACHE["data"] = None
+    _EVIDENCE_CACHE.clear()
+    if clear_satellite:
+        _SATELLITE_CACHE.clear()
+
+
+def _build_fallback_forecast(match: dict, hours: int = 12) -> list[dict]:
+    """Fallback curve when a specific H3 cell has no historical rows."""
+    base = match.get("sensor_pm25")
+    if base is None:
+        base = match.get("aqi_estimate")
+    if base is None:
+        base = 80.0
+    base = float(base)
+
+    now = datetime.now(timezone.utc)
+    preds = []
+    for step in range(1, hours + 1):
+        trend = base * (0.98 + (step / 200.0))
+        preds.append({
+            "timestamp": (now + timedelta(hours=step)).isoformat(),
+            "predicted_pm25": round(max(10.0, trend), 1),
+        })
+    return preds
+
+
+async def _get_evidence_cached(h3_cell: str, max_age_seconds: float = 20.0):
+    cached = _EVIDENCE_CACHE.get(h3_cell)
+    if cached and (time.time() - cached.get("ts", 0.0)) <= max_age_seconds:
+        return cached["payload"]
+
+    payload = await _build_evidence_payload(h3_cell)
+
+    # Do not cache placeholder/template AI responses. If Gemini timed out once,
+    # the next request should retry live generation instead of repeating fallback.
+    incident_note = str(payload.get("incident_explanation", {}).get("confidence_note", "")).lower()
+    recommendation_note = str(payload.get("recommendation", {}).get("fallback_note", "")).lower()
+    has_fallback_template = (
+        "template explanation" in incident_note
+        or "template recommendation" in recommendation_note
+    )
+
+    if not has_fallback_template:
+        _EVIDENCE_CACHE[h3_cell] = {"ts": time.time(), "payload": payload}
+    return payload
+
+
+async def _build_evidence_payload(h3_cell: str):
+    hotspots = await _get_hotspots_cached(max_age_seconds=12.0)
+    match = next((h for h in hotspots["hotspots"] if h["h3_cell"] == h3_cell), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="cell not currently a hotspot")
+
+    impact = impact_engine.compute_impact_score(h3_cell, match.get("confidence_score", 0))
+    weather = await weather_client.fetch_weather(h3_cell)
+
+    corridor = compute_propagation_corridor(
+        h3_cell,
+        weather["wind_direction_deg"],
+        weather["wind_speed_kmh"],
+        match.get("confidence_score", 0.5),
+    )
+    corridor_impact = impact_engine.compute_corridor_impact(corridor, match.get("confidence_score", 0.5))
+
+    df = _get_historical_df()
+    forecast_data = None
+    try:
+        if not forecast.is_trained():
+            forecast.train(df)
+        forecast_data = forecast.forecast_cell(df, h3_cell, hours_ahead=12)
+    except ValueError:
+        forecast_data = _build_fallback_forecast(match, hours=12)
+    except RuntimeError:
+        forecast_data = _build_fallback_forecast(match, hours=12)
+
+    spike_info = None
+    if forecast_data:
+        from app.services.hotspot_detection import PM25_UNHEALTHY
+        for pred in forecast_data:
+            if pred["predicted_pm25"] >= PM25_UNHEALTHY:
+                spike_info = {
+                    "threshold": PM25_UNHEALTHY,
+                    "predicted_value": pred["predicted_pm25"],
+                    "hours_until": round((
+                        datetime.fromisoformat(pred["timestamp"]) - datetime.now(timezone.utc)
+                    ).total_seconds() / 3600, 1),
+                    "timestamp": pred["timestamp"],
+                }
+                break
+
+    explanation_data = {**match, "weather": weather, "impact": impact}
+    rec_data = {
+        **match,
+        "weather": weather,
+        "impact": impact,
+        "corridor_impact": corridor_impact,
+        "forecast_spike": spike_info,
+    }
+
+    try:
+        incident_result, recommendation_result = await asyncio.wait_for(
+            asyncio.gather(
+                asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
+                asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),
+                return_exceptions=True,
+            ),
+            timeout=_GEMINI_EVIDENCE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        incident_result = asyncio.TimeoutError()
+        recommendation_result = asyncio.TimeoutError()
+
+    if isinstance(incident_result, Exception):
+        if isinstance(incident_result, asyncio.TimeoutError):
+            incident_explanation = gemini_client._mock_incident_explanation(
+                explanation_data,
+                fallback_reason="gemini_timeout",
+            )
+        else:
+            incident_explanation = gemini_client._mock_incident_explanation(
+                explanation_data,
+                fallback_reason=f"gemini_error: {str(incident_result)[:120]}",
+            )
+    else:
+        incident_explanation = incident_result
+
+    if isinstance(recommendation_result, Exception):
+        if isinstance(recommendation_result, asyncio.TimeoutError):
+            recommendation = gemini_client._mock_recommendation(
+                rec_data,
+                fallback_reason="gemini_timeout",
+            )
+        else:
+            recommendation = gemini_client._mock_recommendation(
+                rec_data,
+                fallback_reason=f"gemini_error: {str(recommendation_result)[:120]}",
+            )
+    else:
+        recommendation = recommendation_result
+
+    eb = match.get("evidence_breakdown", {})
+    evidence_checklist = []
+    if eb.get("satellite_anomaly", {}).get("signal_strength", 0) > 0.3:
+        evidence_checklist.append({"check": "Satellite anomaly detected", "active": True})
+    else:
+        evidence_checklist.append({"check": "Satellite anomaly detected", "active": False})
+
+    citizen_count = match.get("citizen_report_count", 0)
+    if citizen_count > 0:
+        evidence_checklist.append({"check": f"{citizen_count} citizen report{'s' if citizen_count != 1 else ''} in this zone", "active": True})
+    else:
+        evidence_checklist.append({"check": "Citizen reports in this zone", "active": False})
+
+    if eb.get("historical_deviation", {}).get("signal_strength", 0) > 0.3:
+        evidence_checklist.append({"check": "Historical baseline exceeded", "active": True})
+    else:
+        evidence_checklist.append({"check": "Historical baseline exceeded", "active": False})
+
+    if eb.get("weather_consistency", {}).get("signal_strength", 0) > 0.4:
+        evidence_checklist.append({"check": "Wind direction consistent with spread", "active": True})
+    else:
+        evidence_checklist.append({"check": "Wind direction consistent with spread", "active": False})
+
+    if eb.get("coverage_uncertainty", {}).get("signal_strength", 0) > 0.5:
+        evidence_checklist.append({"check": "Insufficient official sensor coverage", "active": True})
+    else:
+        evidence_checklist.append({"check": "Sufficient official sensor coverage", "active": True})
+
+    if eb.get("sensor_evidence", {}).get("signal_strength", 0) > 0.3:
+        evidence_checklist.append({"check": "Nearby sensor confirms elevated levels", "active": True})
+    else:
+        evidence_checklist.append({"check": "Nearby sensor data does not yet show equivalent severity", "active": match.get("severity") == "hidden"})
+
+    return {
+        **match,
+        "weather": weather,
+        "impact": impact,
+        "corridor": corridor,
+        "corridor_impact": corridor_impact,
+        "forecast": forecast_data,
+        "spike_info": spike_info,
+        "incident_explanation": incident_explanation,
+        "recommendation": recommendation,
+        "evidence_checklist": evidence_checklist,
+    }

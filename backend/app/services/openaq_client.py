@@ -21,16 +21,20 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 
-import httpx
+import requests
 
 OPENAQ_BASE_URL = "https://api.openaq.org/v3"
 
 # Fail fast during local demos: if live OpenAQ is slow/unreachable,
 # immediately fall back to deterministic mock readings.
 OPENAQ_REQUEST_TIMEOUT = float(os.environ.get("OPENAQ_REQUEST_TIMEOUT", "8"))
-OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "25"))
-OPENAQ_LOCATIONS_LIMIT = int(os.environ.get("OPENAQ_LOCATIONS_LIMIT", "25"))
+OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "30"))
+OPENAQ_LOCATIONS_LIMIT = int(os.environ.get("OPENAQ_LOCATIONS_LIMIT", "8"))
 OPENAQ_MAX_CONCURRENCY = int(os.environ.get("OPENAQ_MAX_CONCURRENCY", "8"))
+OPENAQ_REAL_CACHE_TTL_SECONDS = float(os.environ.get("OPENAQ_REAL_CACHE_TTL_SECONDS", "1800"))
+
+_LAST_REAL_READINGS: list[dict] = []
+_LAST_REAL_READINGS_TS: float = 0.0
 
 
 def _get_api_key() -> Optional[str]:
@@ -47,15 +51,17 @@ async def fetch_locations(bbox: str, limit: int = OPENAQ_LOCATIONS_LIMIT) -> lis
         return _mock_locations(bbox, limit)
 
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
+        def _call():
+            return requests.get(
                 f"{OPENAQ_BASE_URL}/locations",
                 params={"bbox": bbox, "limit": limit},
                 headers={"X-API-Key": api_key},
                 timeout=OPENAQ_REQUEST_TIMEOUT,
             )
-            resp.raise_for_status()
-            return resp.json().get("results", [])
+
+        resp = await asyncio.to_thread(_call)
+        resp.raise_for_status()
+        return resp.json().get("results", [])
     except Exception:
         return _mock_locations(bbox, limit)
 
@@ -71,15 +77,17 @@ async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
         return _mock_measurements(location_id)
 
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
+        def _call():
+            return requests.get(
                 f"{OPENAQ_BASE_URL}/locations/{location_id}/latest",
                 headers={"X-API-Key": api_key},
                 params={"parameters_id": 2},
                 timeout=OPENAQ_REQUEST_TIMEOUT,
             )
-            resp.raise_for_status()
-            raw = resp.json().get("results", [])
+
+        resp = await asyncio.to_thread(_call)
+        resp.raise_for_status()
+        raw = resp.json().get("results", [])
     except Exception:
         return _mock_measurements(location_id)
 
@@ -169,15 +177,21 @@ async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
     Returns [{lat, lng, pm25, station_name, timestamp, source}] ready for H3 binning.
     Fetches all stations concurrently with individual error handling.
     """
+    global _LAST_REAL_READINGS, _LAST_REAL_READINGS_TS
+
     try:
         locations = await asyncio.wait_for(
             fetch_locations(bbox, limit=OPENAQ_LOCATIONS_LIMIT),
             timeout=OPENAQ_TOTAL_TIMEOUT,
         )
     except Exception:
+        if _LAST_REAL_READINGS and (datetime.now(timezone.utc).timestamp() - _LAST_REAL_READINGS_TS) <= OPENAQ_REAL_CACHE_TTL_SECONDS:
+            return _LAST_REAL_READINGS
         return await _fetch_mock_readings(bbox)
 
     if not locations:
+        if _LAST_REAL_READINGS and (datetime.now(timezone.utc).timestamp() - _LAST_REAL_READINGS_TS) <= OPENAQ_REAL_CACHE_TTL_SECONDS:
+            return _LAST_REAL_READINGS
         return await _fetch_mock_readings(bbox)
 
     semaphore = asyncio.Semaphore(OPENAQ_MAX_CONCURRENCY)
@@ -216,31 +230,22 @@ async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
             })
         return results
 
-    # Fetch all concurrently
-    tasks = [asyncio.create_task(_fetch_one(loc)) for loc in locations]
-    done, pending = await asyncio.wait(tasks, timeout=OPENAQ_TOTAL_TIMEOUT)
-
-    # Cancel and drain pending tasks so cancelled exceptions are consumed.
-    for task in pending:
-        task.cancel()
-    if pending:
-        await asyncio.gather(*pending, return_exceptions=True)
-
-    results = []
-    for task in done:
-        try:
-            results.append(task.result())
-        except Exception:
-            results.append([])
+    # Fetch all concurrently; each task has its own timeout budget.
+    results = await asyncio.gather(*[_fetch_one(loc) for loc in locations], return_exceptions=True)
 
     readings = []
     for r in results:
         if isinstance(r, list):
             readings.extend(r)
 
-    # If no usable live readings arrived in budget, fall back to mock so map is never blank.
+    # If no usable live readings arrived in budget, prefer recent real cache before mock.
     if not readings:
+        if _LAST_REAL_READINGS and (datetime.now(timezone.utc).timestamp() - _LAST_REAL_READINGS_TS) <= OPENAQ_REAL_CACHE_TTL_SECONDS:
+            return _LAST_REAL_READINGS
         return await _fetch_mock_readings(bbox)
+
+    _LAST_REAL_READINGS = readings
+    _LAST_REAL_READINGS_TS = datetime.now(timezone.utc).timestamp()
 
     return readings
 

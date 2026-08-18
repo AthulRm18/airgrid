@@ -7,6 +7,9 @@ import ReportPanel from "./components/ReportPanel";
 import EvidencePanel from "./components/EvidencePanel";
 
 const POLL_INTERVAL_MS = 8000;
+const HOTSPOT_TIMEOUT_MS = 12000;
+const HEALTH_TIMEOUT_MS = 5000;
+const OFFLINE_FAIL_THRESHOLD = 2;
 
 function App() {
   const [hotspots, setHotspots] = useState([]);
@@ -16,30 +19,61 @@ function App() {
   const [error, setError] = useState(null);
   const [seeding, setSeeding] = useState(false);
   const [backendOk, setBackendOk] = useState(null);
+  const [seedStatus, setSeedStatus] = useState("");
   const autoSeedAttempted = useRef(false);
+  const consecutiveFailures = useRef(0);
+
+  const checkBackendHealth = useCallback(async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+    try {
+      const res = await fetch("/api/health", { signal: controller.signal });
+      return res.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch("/api/hotspots");
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), HOTSPOT_TIMEOUT_MS);
+      const res = await fetch("/api/hotspots", { signal: controller.signal });
+      clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data = await res.json();
       setHotspots(data.hotspots ?? []);
       setLastUpdated(new Date());
       setError(null);
       setBackendOk(true);
+      consecutiveFailures.current = 0;
       return data.hotspots ?? [];
-    } catch (e) {
-      setError("Backend offline — run: cd backend && uvicorn app.main:app --reload --port 8000");
-      setBackendOk(false);
-      return [];
+    } catch {
+      consecutiveFailures.current += 1;
+      const healthy = await checkBackendHealth();
+      if (healthy) {
+        setBackendOk(true);
+        setError("Live feed delayed. Retrying...");
+        return null;
+      }
+
+      if (consecutiveFailures.current >= OFFLINE_FAIL_THRESHOLD) {
+        setError("Backend offline. Start backend on port 8000.");
+        setBackendOk(false);
+      } else {
+        setError("Reconnecting to backend...");
+      }
+      return null;
     }
-  }, []);
+  }, [checkBackendHealth]);
 
   useEffect(() => {
     async function init() {
       const spots = await refresh();
       // If backend is up but empty (e.g. auto-seed disabled), seed once.
-      if (spots.length === 0 && !autoSeedAttempted.current) {
+      if (Array.isArray(spots) && spots.length === 0 && !autoSeedAttempted.current) {
         autoSeedAttempted.current = true;
         try {
           const health = await fetch("/api/health");
@@ -66,9 +100,16 @@ function App() {
 
   async function seedDemo() {
     setSeeding(true);
+    setSeedStatus("");
     try {
-      await fetch("/api/demo/seed", { method: "POST" });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const res = await fetch("/api/demo/seed", { method: "POST", signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (!res.ok) throw new Error(`seed status ${res.status}`);
+      const seeded = await res.json();
       await refresh();
+      setSeedStatus(`Seeded ${seeded?.seeded ?? 0} demo reports`);
     } finally {
       setSeeding(false);
     }
@@ -118,6 +159,9 @@ function App() {
             lastUpdated && (
               <span>Updated {lastUpdated.toLocaleTimeString()}</span>
             )
+          )}
+          {!error && seedStatus && (
+            <span className="text-[var(--color-clear-400)]">{seedStatus}</span>
           )}
         </div>
       </header>
