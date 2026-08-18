@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+h3
+httpx
+pydantic
+python-dotenv
+lightgbm
+scikit-learn
+pandas
+numpy
+google-genai
+earthengine-api

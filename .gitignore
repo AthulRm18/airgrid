@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Env / secrets — NEVER commit these
+.env
+*.env
+ee-service-account.json
+*-service-account*.json
+*.pem
+*.key
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+
+# OS / editor
+.DS_Store
+.vscode/settings.json
+*.log
+
+# Data / models (keep repo light — large files don't belong in git)
+*.pkl
+*.h5
+backend/data/*.csv
