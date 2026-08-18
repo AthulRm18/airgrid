@@ -1,88 +1,150 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { MapContainer, TileLayer, Polygon, CircleMarker, Tooltip as LTooltip, useMap } from "react-leaflet";
 import { cellToBoundary } from "h3-js";
 import { SEVERITY } from "../lib/severity";
-import { makeProjector } from "../lib/projection";
+import "leaflet/dist/leaflet.css";
 
-// Delhi-NCR bbox, matches the backend's default mock coverage area.
-// Swap this when you point the pipeline at a different city/region.
-const DEFAULT_BBOX = [76.8, 28.4, 77.6, 28.9];
+// Delhi-NCR center and zoom
+const MAP_CENTER = [28.63, 77.22];
+const MAP_ZOOM = 11;
 
-const WIDTH = 720;
-const HEIGHT = 560;
+export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpenEvidence }) {
+  const [propagation, setPropagation] = useState(null);
+  const [sensors, setSensors] = useState([]);
 
-export default function HotspotMap({ hotspots, selectedCell, onSelectCell }) {
-  const [hovered, setHovered] = useState(null);
-  const project = useMemo(() => makeProjector(DEFAULT_BBOX, WIDTH, HEIGHT), []);
+  // Load propagation when a cell is selected
+  useEffect(() => {
+    if (!selectedCell) { setPropagation(null); return; }
+    fetch(`/api/propagation/${selectedCell}`)
+      .then((r) => r.json())
+      .then(setPropagation)
+      .catch(() => setPropagation(null));
+  }, [selectedCell]);
 
-  const polygons = useMemo(
-    () =>
-      hotspots.map((h) => {
-        const boundary = cellToBoundary(h.h3_cell, false); // [[lat,lng], ...]
-        const points = boundary.map((pt) => project(pt).join(",")).join(" ");
-        const [cx, cy] = project([h.lat, h.lng]);
-        return { ...h, points, cx, cy };
-      }),
-    [hotspots, project]
+  const hexPolygons = useMemo(() =>
+    hotspots.map((h) => {
+      const boundary = cellToBoundary(h.h3_cell); // returns [lat, lng]
+      const positions = boundary.map(([lat, lng]) => [lat, lng]);
+      return { ...h, positions };
+    }), [hotspots]
   );
+
+  const corridorPolygons = useMemo(() => {
+    if (!propagation?.corridor) return [];
+    return propagation.corridor.map((c) => {
+      const boundary = cellToBoundary(c.h3_cell);
+      const positions = boundary.map(([lat, lng]) => [lat, lng]);
+      return { ...c, positions };
+    });
+  }, [propagation]);
 
   return (
     <div className="relative rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] haze-backdrop overflow-hidden">
-      <div className="flex items-center justify-between px-5 pt-5">
+      <div className="flex items-center justify-between px-5 pt-5 pb-3">
         <h2 className="font-[family-name:var(--font-display)] text-lg text-[var(--color-mist-50)]">
-          Hotspot grid
+          Pollution intelligence grid
         </h2>
         <Legend />
       </div>
 
-      <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        preserveAspectRatio="xMidYMid meet"
-        className="w-full h-[420px]"
-        role="img"
-        aria-label="H3 hexagon grid of detected air quality hotspots"
-      >
-        {polygons.map((p) => {
-          const isSelected = selectedCell === p.h3_cell;
-          const isHovered = hovered === p.h3_cell;
-          const sev = SEVERITY[p.severity] ?? SEVERITY.unverified;
-          return (
-            <g key={p.h3_cell}>
-              {p.severity === "hidden" && (
-                <circle
-                  cx={p.cx}
-                  cy={p.cy}
-                  r={14}
-                  fill="none"
-                  stroke={sev.color}
-                  strokeWidth={2}
-                  className="hex-pulse"
-                  style={{ transformOrigin: `${p.cx}px ${p.cy}px` }}
-                />
-              )}
-              <polygon
-                points={p.points}
-                fill={sev.color}
-                fillOpacity={isSelected || isHovered ? 0.55 : 0.32}
-                stroke={sev.color}
-                strokeWidth={isSelected ? 2.5 : 1}
-                className="cursor-pointer transition-[fill-opacity] duration-150"
-                onMouseEnter={() => setHovered(p.h3_cell)}
-                onMouseLeave={() => setHovered(null)}
-                onClick={() => onSelectCell(p.h3_cell)}
-              />
-            </g>
-          );
-        })}
-      </svg>
+      <div className="h-[480px]">
+        <MapContainer
+          center={MAP_CENTER}
+          zoom={MAP_ZOOM}
+          className="h-full w-full"
+          zoomControl={true}
+          attributionControl={true}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+          />
 
-      {hovered && (
-        <HoverCard hotspot={polygons.find((p) => p.h3_cell === hovered)} />
-      )}
+          {/* Propagation corridor (rendered UNDER hotspot hexes) */}
+          {corridorPolygons.map((c) => {
+            const intensity = c.predicted_intensity || 0.3;
+            const color = intensity > 0.5 ? "#e87d3a" : intensity > 0.25 ? "#e8a23d" : "#e8c93d";
+            return (
+              <Polygon
+                key={`prop-${c.h3_cell}`}
+                positions={c.positions}
+                pathOptions={{
+                  fillColor: color,
+                  fillOpacity: 0.25 + intensity * 0.2,
+                  color: color,
+                  weight: 1,
+                  opacity: 0.6,
+                }}
+              >
+                <LTooltip sticky>
+                  <div style={{ fontSize: 12 }}>
+                    <strong>Predicted exposure</strong><br />
+                    Intensity: {(intensity * 100).toFixed(0)}%<br />
+                    Arrival: ~{c.hours_to_impact}h
+                  </div>
+                </LTooltip>
+              </Polygon>
+            );
+          })}
+
+          {/* Hotspot hex cells */}
+          {hexPolygons.map((h) => {
+            const isSelected = selectedCell === h.h3_cell;
+            const sev = SEVERITY[h.severity] ?? SEVERITY.unverified;
+            const rawColor = sev.rawColor;
+            return (
+              <Polygon
+                key={h.h3_cell}
+                positions={h.positions}
+                pathOptions={{
+                  fillColor: rawColor,
+                  fillOpacity: isSelected ? 0.55 : 0.32,
+                  color: rawColor,
+                  weight: isSelected ? 3 : 1.5,
+                  opacity: isSelected ? 1 : 0.7,
+                }}
+                eventHandlers={{
+                  click: () => onSelectCell(h.h3_cell),
+                  dblclick: () => onOpenEvidence?.(h.h3_cell),
+                }}
+              >
+                <LTooltip sticky>
+                  <div style={{ fontSize: 12, maxWidth: 220 }}>
+                    <strong>{sev.label}</strong>{" "}
+                    <span style={{ fontFamily: "monospace", fontSize: 10, color: "#888" }}>
+                      {h.h3_cell}
+                    </span>
+                    <br />
+                    {h.confidence_score != null && (
+                      <>Confidence: {(h.confidence_score * 100).toFixed(0)}%<br /></>
+                    )}
+                    {h.sensor_pm25 != null && <>PM2.5: {h.sensor_pm25} µg/m³<br /></>}
+                    {h.citizen_report_count > 0 && <>{h.citizen_report_count} citizen report(s)<br /></>}
+                    <span style={{ fontSize: 11, color: "#aaa" }}>{h.explanation}</span>
+                  </div>
+                </LTooltip>
+              </Polygon>
+            );
+          })}
+
+          {/* Wind direction indicator (if propagation loaded) */}
+          {propagation?.weather && selectedCell && (
+            <WindArrow
+              lat={propagation.weather.lat}
+              lng={propagation.weather.lng}
+              direction={propagation.weather.wind_direction_deg}
+              speed={propagation.weather.wind_speed_kmh}
+            />
+          )}
+
+          <FitBounds hotspots={hotspots} />
+        </MapContainer>
+      </div>
 
       {hotspots.length === 0 && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-[var(--color-mist-400)] text-sm">
-            No hotspots yet — submit a citizen report or ingest sensor data to populate the grid.
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <p className="text-[var(--color-mist-400)] text-sm bg-[var(--color-ink-900)]/80 px-4 py-2 rounded-lg">
+            No hotspots yet — submit a citizen report or seed demo data.
           </p>
         </div>
       )}
@@ -90,38 +152,59 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell }) {
   );
 }
 
+function WindArrow({ lat, lng, direction, speed }) {
+  // The arrow points in the direction pollution MOVES (wind_from + 180)
+  const pollutionDir = (direction + 180) % 360;
+  return (
+    <CircleMarker
+      center={[lat, lng]}
+      radius={0}
+    >
+      <LTooltip permanent direction="top" className="wind-tooltip">
+        <div style={{ fontSize: 11, textAlign: "center", whiteSpace: "nowrap" }}>
+          <span style={{ display: "inline-block", transform: `rotate(${pollutionDir}deg)`, fontSize: 16 }}>
+            ↑
+          </span>{" "}
+          {speed} km/h
+        </div>
+      </LTooltip>
+    </CircleMarker>
+  );
+}
+
+
+function FitBounds({ hotspots }) {
+  const map = useMap();
+  useEffect(() => {
+    if (hotspots.length === 0) return;
+    const lats = hotspots.map((h) => h.lat);
+    const lngs = hotspots.map((h) => h.lng);
+    const bounds = [
+      [Math.min(...lats) - 0.02, Math.min(...lngs) - 0.02],
+      [Math.max(...lats) + 0.02, Math.max(...lngs) + 0.02],
+    ];
+    map.fitBounds(bounds, { padding: [20, 20], maxZoom: 12 });
+  }, [hotspots.length]); // only on initial load
+  return null;
+}
+
+
 function Legend() {
   return (
-    <div className="flex gap-3 text-xs text-[var(--color-mist-400)]">
+    <div className="flex flex-wrap gap-3 text-xs text-[var(--color-mist-400)]">
       {Object.entries(SEVERITY).map(([key, s]) => (
         <span key={key} className="flex items-center gap-1.5">
           <span
             className="inline-block w-2.5 h-2.5 rounded-full"
-            style={{ backgroundColor: s.color }}
+            style={{ backgroundColor: s.rawColor }}
           />
           {s.label}
         </span>
       ))}
-    </div>
-  );
-}
-
-function HoverCard({ hotspot }) {
-  if (!hotspot) return null;
-  const sev = SEVERITY[hotspot.severity] ?? SEVERITY.unverified;
-  return (
-    <div className="absolute bottom-4 left-4 right-4 rounded-xl border border-[var(--color-ink-600)] bg-[var(--color-ink-800)]/95 backdrop-blur px-4 py-3 pointer-events-none">
-      <div className="flex items-center gap-2 mb-1">
-        <span
-          className="inline-block w-2 h-2 rounded-full"
-          style={{ backgroundColor: sev.color }}
-        />
-        <span className="text-sm font-medium text-[var(--color-mist-50)]">{sev.label}</span>
-        <span className="ml-auto font-[family-name:var(--font-mono)] text-xs text-[var(--color-mist-400)]">
-          {hotspot.h3_cell}
-        </span>
-      </div>
-      <p className="text-sm text-[var(--color-mist-200)]">{hotspot.explanation}</p>
+      <span className="flex items-center gap-1.5">
+        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#e87d3a" }} />
+        Predicted spread
+      </span>
     </div>
   );
 }

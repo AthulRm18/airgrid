@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* --- AirGrid design tokens ---
+  /* --- VIGIL design tokens ---
      Palette evokes dusk-under-haze: a deep slate-blue base rather than
      pure black, so the severity colors (which DO follow AQI convention —
      officers need instant recognition, this isn't a place to be clever)
@@ -28,6 +28,17 @@
                                          shouldn't look like it does */
   --color-sev-unverified: #4a5568;   /* slate — low-confidence signal */
 
+  /* propagation corridor */
+  --color-prop-near: #e87d3a;    /* orange — near-term spread */
+  --color-prop-mid: #e8a23d;     /* amber  — mid-term spread */
+  --color-prop-far: #e8c93d;     /* yellow — far-term spread */
+
+  /* impact */
+  --color-impact-critical: #e0524a;
+  --color-impact-high: #e87d3a;
+  --color-impact-moderate: #e8a23d;
+  --color-impact-low: #4fb8ac;
+
   --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
@@ -39,8 +50,7 @@ body {
   font-family: var(--font-body);
 }
 
-/* subtle atmospheric texture behind the map — never distracting, just
-   reinforces "you're looking at air", not a flat dashboard tile */
+/* subtle atmospheric texture behind the map */
 .haze-backdrop {
   background:
     radial-gradient(ellipse 80% 50% at 20% -10%, rgba(79,184,172,0.10), transparent),
@@ -56,6 +66,65 @@ body {
   animation: pulse-ring 2.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .hex-pulse { animation: none; }
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
+.animate-fade-in {
+  animation: fade-in-up 0.3s ease-out;
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-count {
+  animation: count-up 0.4s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hex-pulse, .animate-fade-in, .animate-slide-in, .animate-count { animation: none; }
+}
+
+/* Leaflet overrides for dark theme */
+.leaflet-container {
+  background: var(--color-ink-900) !important;
+}
+.leaflet-tile-pane {
+  filter: brightness(0.7) contrast(1.15) saturate(0.3);
+}
+.leaflet-control-zoom a {
+  background: var(--color-ink-800) !important;
+  color: var(--color-mist-200) !important;
+  border-color: var(--color-ink-600) !important;
+}
+.leaflet-control-zoom a:hover {
+  background: var(--color-ink-700) !important;
+}
+.leaflet-control-attribution {
+  background: rgba(13, 17, 23, 0.8) !important;
+  color: var(--color-mist-400) !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a {
+  color: var(--color-mist-400) !important;
+}
+
+/* Confidence gauge */
+.confidence-ring {
+  transition: stroke-dashoffset 0.6s ease-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--color-ink-900); }
+::-webkit-scrollbar-thumb { background: var(--color-ink-600); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-ink-700); }

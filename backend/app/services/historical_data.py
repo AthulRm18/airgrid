@@ -1,19 +1,15 @@
 """
-Historical PM2.5 time series for forecast training.
+Historical PM2.5 time series for forecast training + baseline calculation.
 
 For the hackathon demo window, this generates a realistic 14-day hourly
 series per mock station: diurnal traffic-driven double-peak (morning +
 evening rush), weekday/weekend difference, and one deliberate agricultural-
-burning spike event — the kind of event AirGrid's fusion is built to catch
+burning spike event — the kind of event VIGIL's fusion is built to catch
 early. It's seeded, so it's identical across runs (stable demo).
 
 For your REAL submission, replace `generate_synthetic_history()` with
 `fetch_real_history()` below, which pulls actual historical readings from
 OpenAQ's /locations/{id}/measurements endpoint (needs OPENAQ_API_KEY).
-Judges are told to reward "real or realistic data" — synthetic-but-
-physically-plausible data is an accepted fallback where live history
-isn't available, but swap in the real pull if you have time before the
-deadline; it strengthens your Problem-Solution Fit score.
 """
 import math
 import random
@@ -62,6 +58,53 @@ def generate_synthetic_history(days: int = 14, resolution: int = 7) -> pd.DataFr
             t += timedelta(hours=1)
 
     return pd.DataFrame(rows)
+
+
+def compute_baseline(historical_df: pd.DataFrame, h3_cell: str) -> dict:
+    """Compute historical baseline (mean + stddev) for a cell,
+    grouped by hour-of-day for fair comparison.
+
+    Returns {
+        "overall_mean": float,
+        "overall_stddev": float,
+        "hourly": {hour: {"mean": float, "stddev": float}, ...}
+    }
+    """
+    cell_data = historical_df[historical_df["h3_cell"] == h3_cell].copy()
+    if cell_data.empty:
+        return {"overall_mean": None, "overall_stddev": None, "hourly": {}}
+
+    cell_data["timestamp"] = pd.to_datetime(cell_data["timestamp"])
+    overall_mean = float(cell_data["pm25"].mean())
+    overall_stddev = float(cell_data["pm25"].std())
+
+    cell_data["hour"] = cell_data["timestamp"].dt.hour
+    hourly = {}
+    for hour, group in cell_data.groupby("hour"):
+        hourly[int(hour)] = {
+            "mean": round(float(group["pm25"].mean()), 1),
+            "stddev": round(float(group["pm25"].std()), 1),
+        }
+
+    return {
+        "overall_mean": round(overall_mean, 1),
+        "overall_stddev": round(overall_stddev, 1),
+        "hourly": hourly,
+    }
+
+
+def get_current_baseline(historical_df: pd.DataFrame, h3_cell: str) -> tuple[float | None, float | None]:
+    """Get the baseline mean and stddev for the current hour.
+    Used by the evidence-fusion score to detect 'historical deviation'."""
+    baseline = compute_baseline(historical_df, h3_cell)
+    if baseline["overall_mean"] is None:
+        return None, None
+
+    current_hour = datetime.now(timezone.utc).hour
+    hourly = baseline["hourly"].get(current_hour, {})
+    mean = hourly.get("mean", baseline["overall_mean"])
+    stddev = hourly.get("stddev", baseline["overall_stddev"])
+    return mean, stddev
 
 
 async def fetch_real_history(location_id: int, date_from: str, date_to: str) -> pd.DataFrame:
