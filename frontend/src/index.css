@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+@theme {
+  /* --- AirGrid design tokens ---
+     Palette evokes dusk-under-haze: a deep slate-blue base rather than
+     pure black, so the severity colors (which DO follow AQI convention —
+     officers need instant recognition, this isn't a place to be clever)
+     have room to read clearly against it.
+  */
+  --color-ink-950: #0d1117;
+  --color-ink-900: #131a24;
+  --color-ink-800: #1b2432;
+  --color-ink-700: #263043;
+  --color-ink-600: #3a475e;
+  --color-mist-400: #7c8aa0;
+  --color-mist-200: #b8c2d1;
+  --color-mist-50: #eef2f7;
+
+  --color-clear-500: #4fb8ac;   /* clean-air accent — brand, not severity */
+  --color-clear-400: #6fd1c5;
+
+  /* severity scale — kept close to global AQI convention on purpose */
+  --color-sev-confirmed: #e0524a;    /* red   — sensor-confirmed */
+  --color-sev-corroborated: #e8a23d; /* amber — multi-signal agreement */
+  --color-sev-hidden: #a870e8;       /* violet — deliberately off the AQI
+                                         palette: this tier doesn't exist
+                                         in standard monitoring, so it
+                                         shouldn't look like it does */
+  --color-sev-unverified: #4a5568;   /* slate — low-confidence signal */
+
+  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-mist-50);
+  font-family: var(--font-body);
+}
+
+/* subtle atmospheric texture behind the map — never distracting, just
+   reinforces "you're looking at air", not a flat dashboard tile */
+.haze-backdrop {
+  background:
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(79,184,172,0.10), transparent),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(168,112,232,0.06), transparent);
+}
+
+@keyframes pulse-ring {
+  0%   { transform: scale(0.9); opacity: 0.9; }
+  70%  { transform: scale(1.8); opacity: 0; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+.hex-pulse {
+  animation: pulse-ring 2.2s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hex-pulse { animation: none; }
+}

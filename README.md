@@ -14,9 +14,9 @@ monitoring misses — and forecast spikes before they happen.
 ✅ FastAPI backend — `/api/hotspots`, `/api/citizen-report`, `/api/citizen-report/photo`, tested end-to-end
 ✅ Gemini text classification + photo scoring wired in (`services/gemini_client.py`) — falls back to a clearly-labeled placeholder score if `GEMINI_API_KEY` isn't set yet, so nobody's blocked
 ✅ Alert acknowledge loop (`POST /api/hotspots/acknowledge`) — closes Detect → Recommend → Notify → Acknowledge
+✅ React dashboard — hex-grid map (SVG, real H3 boundaries), authority alert queue with acknowledge flow, citizen report panel (text + photo), all wired to the live backend
 ⬜ Earth Engine Sentinel-5P satellite integration (currently mocked deterministically per H3 cell)
 ⬜ LightGBM forecasting model
-⬜ React dashboard / map
 ⬜ Cloud Run deployment
 ⬜ Offline-first queue on the citizen-report client
 
@@ -46,6 +46,28 @@ curl -X POST http://127.0.0.1:8000/api/hotspots/acknowledge \
 
 Or skip curl entirely — run the server, then open http://127.0.0.1:8000/docs
 for FastAPI's interactive test UI (click "Try it out" on any endpoint).
+
+## Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev   # opens on http://localhost:5173, proxies /api/* to :8000
+```
+
+Run the backend (`uvicorn app.main:app --reload --port 8000`) in a separate
+terminal first — the dashboard fetches `/api/hotspots` on load and polls it
+every 8s. The hex map renders real H3 cell boundaries (via `h3-js`) — no
+Google Maps key needed to develop against it; swap in Google Maps Platform
+later if you want real street-level basemap tiles under the hexes for the
+final demo (see `components/HotspotMap.jsx`, the `DEFAULT_BBOX` constant
+controls which region is projected — currently Delhi-NCR to match the
+backend's mock sensor network).
+
+Three pieces:
+- `HotspotMap.jsx` — the hex grid, colored by severity, hidden hotspots pulse
+- `AlertQueue.jsx` — authority-facing queue, ranked hidden-first, expands to a Gemini-generated recommendation + an acknowledge action
+- `ReportPanel.jsx` — citizen DETECT entry point (text or photo)
 
 ## Getting API keys (do this today — don't block on it later)
 
