@@ -28,7 +28,7 @@ _loaded = False
 
 def _init_firebase():
     global _db, _using_firebase, _initialized
-    if _initialized:
+    if _initialized and _using_firebase:
         return
     _initialized = True
 
@@ -45,8 +45,19 @@ def _init_firebase():
         from firebase_admin import credentials, firestore
 
         if not firebase_admin._apps:
-            if creds_path and Path(creds_path).exists():
-                cred = credentials.Certificate(creds_path)
+            resolved_cred_path = None
+            if creds_path:
+                p = Path(creds_path)
+                backend_dir = Path(__file__).resolve().parents[2]
+                if p.exists():
+                    resolved_cred_path = p
+                elif (backend_dir / creds_path).exists():
+                    resolved_cred_path = backend_dir / creds_path
+                elif (backend_dir / p.name).exists():
+                    resolved_cred_path = backend_dir / p.name
+
+            if resolved_cred_path:
+                cred = credentials.Certificate(str(resolved_cred_path))
             elif creds_path:
                 try:
                     cred_dict = json.loads(creds_path)

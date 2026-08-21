@@ -9,7 +9,10 @@ env/
 # Env / secrets — NEVER commit these
 .env
 *.env
+backend/.env
 ee-service-account.json
+service-account.json
+*service-account*.json
 *-service-account*.json
 *.pem
 *.key

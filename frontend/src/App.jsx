@@ -84,11 +84,24 @@ function App() {
     }
   }, []);
 
-  const refreshHotspots = useCallback(async () => {
+  // Optimistically patch a single hotspot in local state (instant UI feedback)
+  const patchHotspot = useCallback((cell, patch) => {
+    setHotspots((prev) =>
+      prev.map((h) => (h.h3_cell === cell ? { ...h, ...patch } : h))
+    );
+    lastHotspots.current = lastHotspots.current.map((h) =>
+      h.h3_cell === cell ? { ...h, ...patch } : h
+    );
+  }, []);
+
+  const refreshHotspots = useCallback(async ({ bypassCache = false } = {}) => {
     try {
       const ctrl = new AbortController();
       setTimeout(() => ctrl.abort(), HOTSPOT_TIMEOUT);
-      const res = await fetch("/api/hotspots", { signal: ctrl.signal });
+      const headers = bypassCache
+        ? { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+        : {};
+      const res = await fetch("/api/hotspots", { signal: ctrl.signal, headers });
       if (!res.ok) throw new Error();
       const d = await res.json();
       const list = d.hotspots ?? [];
@@ -227,7 +240,10 @@ function App() {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || `Failed (${res.status})`);
     }
-    await refreshHotspots();
+    // Instant optimistic update — badge appears immediately
+    patchHotspot(cell, { acknowledged: true });
+    // Then sync with backend (bypass cache so we get fresh data)
+    setTimeout(() => refreshHotspots({ bypassCache: true }), 300);
   }
 
   function handleReportSubmitted(result) {
@@ -380,7 +396,8 @@ function App() {
               onSelectCell={setSelectedCell}
               onAcknowledge={handleAcknowledge}
               onOpenEvidence={openEvidence}
-              onRefresh={refreshHotspots}
+              onRefresh={() => refreshHotspots({ bypassCache: true })}
+              onPatchHotspot={patchHotspot}
               session={session}
               sessionToken={sessionToken}
               activeRegion={activeRegion}

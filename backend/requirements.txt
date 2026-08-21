@@ -11,3 +11,4 @@ pandas
 numpy
 google-genai
 earthengine-api
+firebase-admin

@@ -141,6 +141,10 @@ async def _train_forecast_on_startup():
     readings are already fetched per-request in /api/hotspots, so there is no
     need to also pull 14 days of history at startup."""
     global _HISTORICAL_DF, _DEMO_SEEDED
+    # Ensure local data directory exists for fallback persistence
+    (Path(__file__).resolve().parents[2] / "data").mkdir(parents=True, exist_ok=True)
+    fb._init_firebase()
+
     print("[CONFLUX] Building training data...")
     _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
     _rebuild_baseline_cache(_HISTORICAL_DF)

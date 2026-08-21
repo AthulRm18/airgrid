@@ -19,6 +19,7 @@ export default function AlertQueue({
   onAcknowledge,
   onOpenEvidence,
   onRefresh,
+  onPatchHotspot,
   session,
   sessionToken,
   activeRegion = "all",
@@ -76,6 +77,7 @@ export default function AlertQueue({
             onAcknowledge={onAcknowledge}
             onOpenEvidence={onOpenEvidence}
             onRefresh={onRefresh}
+            onPatchHotspot={onPatchHotspot}
             session={session}
             sessionToken={sessionToken}
           />
@@ -96,6 +98,7 @@ export default function AlertQueue({
             onAcknowledge={onAcknowledge}
             onOpenEvidence={onOpenEvidence}
             onRefresh={onRefresh}
+            onPatchHotspot={onPatchHotspot}
             session={session}
             sessionToken={sessionToken}
             compact
@@ -112,7 +115,7 @@ export default function AlertQueue({
   );
 }
 
-function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvidence, onRefresh, session, sessionToken, compact }) {
+function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvidence, onRefresh, onPatchHotspot, session, sessionToken, compact }) {
   const [expanded, setExpanded] = useState(false);
   const [forecastData, setForecastData] = useState(null);
   const [loadingForecast, setLoadingForecast] = useState(false);
@@ -189,6 +192,8 @@ function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvi
         },
         body: JSON.stringify({ h3_cell: hotspot.h3_cell, alert_type: "public_advisory" }),
       });
+      // Instant optimistic update
+      onPatchHotspot?.(hotspot.h3_cell, { alert_issued: true });
       onRefresh?.();
     } finally {
       setIssuingAlert(false);
@@ -204,6 +209,8 @@ function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvi
       },
       body: JSON.stringify({ h3_cell: hotspot.h3_cell, reason: "False positive / resolved" }),
     });
+    // Instant optimistic update
+    onPatchHotspot?.(hotspot.h3_cell, { dismissed: true });
     onRefresh?.();
   }
 
