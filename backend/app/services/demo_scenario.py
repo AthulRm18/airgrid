@@ -123,23 +123,56 @@ DEMO_ISSUED_ALERT = {
     "issued_at": None,  # filled at seed time
 }
 
-# Pre-scripted BRICS federated event (from partner country)
-DEMO_BRICS_EVENT = {
-    "schema_version": "brics.v1",
-    "origin_country": "CN",
-    "h3_cell": "872a1072fffffff",
-    "lat": 39.9042,
-    "lng": 116.4074,
-    "severity": "corroborated",
-    "confidence_score": 0.74,
-    "evidence_summary": (
-        "Cross-border transboundary event detected. Beijing monitoring "
-        "shows PM2.5 spike consistent with VIGIL fusion model. "
-        "Wind trajectory analysis suggests possible corridor into northern India."
-    ),
-    "source_system": "VIGIL-CN",
-    "timestamp": None,  # filled at seed time
-}
+# Pre-scripted BRICS federated events (one per partner country)
+DEMO_BRICS_EVENTS = [
+    {
+        "schema_version": "brics.v1",
+        "origin_country": "CN",
+        "h3_cell": "872a1072fffffff",
+        "lat": 39.9042,
+        "lng": 116.4074,
+        "severity": "corroborated",
+        "confidence_score": 0.74,
+        "evidence_summary": "Beijing node: PM2.5 spike aligned with transboundary wind corridor toward northern India.",
+        "source_system": "VIGIL-CN",
+    },
+    {
+        "schema_version": "brics.v1",
+        "origin_country": "BR",
+        "h3_cell": "87a8100c7ffffff",
+        "lat": -23.5505,
+        "lng": -46.6333,
+        "severity": "confirmed",
+        "confidence_score": 0.68,
+        "evidence_summary": "São Paulo: Industrial corridor smoke event — shared for model calibration.",
+        "source_system": "VIGIL-BR",
+    },
+    {
+        "schema_version": "brics.v1",
+        "origin_country": "RU",
+        "h3_cell": "8711aa48cffffff",
+        "lat": 55.7558,
+        "lng": 37.6173,
+        "severity": "corroborated",
+        "confidence_score": 0.61,
+        "evidence_summary": "Moscow region: Seasonal biomass burning pattern matches forecast model training set.",
+        "source_system": "VIGIL-RU",
+    },
+    {
+        "schema_version": "brics.v1",
+        "origin_country": "ZA",
+        "h3_cell": "87b2e0a12ffffff",
+        "lat": -26.2041,
+        "lng": 28.0473,
+        "severity": "hidden",
+        "confidence_score": 0.58,
+        "evidence_summary": "Johannesburg east: Sensor-blind zone detected via citizen reports only.",
+        "source_system": "VIGIL-ZA",
+    },
+]
+
+# Legacy single event alias
+DEMO_BRICS_EVENT = DEMO_BRICS_EVENTS[0]
 
 
 def get_demo_reports() -> list[dict]:

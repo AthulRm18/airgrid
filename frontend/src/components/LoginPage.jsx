@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Shield, Loader2, User, Search, Building2, FlaskConical, Globe2 } from "lucide-react";
+import { Loader2, User, Search, Building2, FlaskConical, Globe2 } from "lucide-react";
+import VigilLogo from "./VigilLogo";
 
 const ROLES = [
   {
@@ -66,9 +67,7 @@ export default function LoginPage({ onLogin, authError }) {
       {/* Left — problem context */}
       <div className="hidden lg:flex lg:w-[42%] flex-col justify-center px-12 xl:px-16 bg-white border-r border-[#dde3ea]">
         <div className="flex items-center gap-3 mb-8">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(26,115,232,0.1)]">
-            <Shield size={20} className="text-[#1a73e8]" />
-          </div>
+          <VigilLogo size={40} />
           <span className="text-xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>
             VIGIL
           </span>
@@ -103,16 +102,14 @@ export default function LoginPage({ onLogin, authError }) {
       {/* Right — role picker */}
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 bg-[#f0f4f9]">
         <div className="lg:hidden mb-8 flex flex-col items-center gap-2">
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(26,115,232,0.1)]">
-            <Shield size={22} className="text-[#1a73e8]" />
-          </div>
+          <VigilLogo size={48} />
           <h1 className="text-2xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>VIGIL</h1>
           <p className="text-sm text-[#5f6f86]">Hyperlocal Air Intelligence</p>
         </div>
 
         <div className="w-full max-w-md">
           <h2 className="text-base font-semibold text-[#16202c] mb-1">Sign in to demo</h2>
-          <p className="text-sm text-[#5f6f86] mb-5">Pick a role — one account per role, password: demo123</p>
+          <p className="text-sm text-[#5f6f86] mb-5">Select your role to enter the dashboard</p>
 
           <div className="space-y-2">
             {ROLES.map((role) => {

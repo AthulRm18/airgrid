@@ -17,7 +17,7 @@ import {
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
 
-const EVIDENCE_TIMEOUT = 45000;
+const EVIDENCE_TIMEOUT = 12000;
 
 export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
   const [full, setFull] = useState(null);       // full Gemini-enriched payload
@@ -35,7 +35,7 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), EVIDENCE_TIMEOUT);
 
-    fetch(`/api/hotspots/${h3Cell}/evidence`, { signal: controller.signal })
+    fetch(`/api/hotspots/${h3Cell}/evidence?fast=true`, { signal: controller.signal })
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then((data) => { if (!cancelled) setFull(data); })
       .catch(() => { if (!cancelled) setAiError(true); })
@@ -190,10 +190,10 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
           <div className="rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-800)] px-4 py-4">
             <div className="flex items-center gap-2 mb-3">
               <MapPin size={14} className="text-[var(--color-clear-500)]" />
-              <span className="text-sm font-medium text-[var(--color-mist-50)]">Gemini analysis</span>
+              <span className="text-sm font-medium text-[var(--color-mist-50)]">Analysis</span>
               {aiLoading && (
                 <span className="flex items-center gap-1.5 text-xs text-[var(--color-mist-400)]">
-                  <Loader2 size={11} className="animate-spin" /> Generating...
+                  <Loader2 size={11} className="animate-spin" /> Loading…
                 </span>
               )}
             </div>
@@ -219,6 +219,10 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
                     ))}
                   </ul>
                 )}
+              </div>
+            ) : hotspot?.explanation ? (
+              <div className="space-y-2">
+                <p className="text-sm leading-relaxed text-[var(--color-mist-200)]">{hotspot.explanation}</p>
               </div>
             ) : aiLoading ? (
               <div className="space-y-2">

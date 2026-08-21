@@ -21,6 +21,7 @@ _FALLBACK_STORE: dict[str, list | dict] = {
     "issued_alerts": {},
     "dismissed": {},
     "active_sessions": {},
+    "federated_events": [],
 }
 _loaded = False
 
@@ -289,6 +290,27 @@ def clear_workflow_state():
     clear_alerts()
     clear_issued_alerts()
     clear_dismissed()
+
+
+# ---------------------------------------------------------------------------
+# Federated BRICS events
+# ---------------------------------------------------------------------------
+
+def save_federated_events(events: list[dict]):
+    _init_firebase()
+    _FALLBACK_STORE["federated_events"] = list(events)
+    _persist_state()
+
+
+def get_federated_events() -> list[dict]:
+    _init_firebase()
+    return list(_FALLBACK_STORE.get("federated_events", []))
+
+
+def clear_federated_events():
+    _init_firebase()
+    _FALLBACK_STORE["federated_events"] = []
+    _persist_state()
 
 
 # ---------------------------------------------------------------------------

@@ -12,17 +12,24 @@ function timeAgo(iso) {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-export default function ReportsFeed({ refreshToken }) {
+export default function ReportsFeed({ refreshToken, reportsBump = 0, pendingReport = null }) {
   const [reports, setReports] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const loadReports = () => {
     fetch("/api/citizen-reports")
       .then((r) => r.ok ? r.json() : { reports: [] })
-      .then((d) => setReports((d.reports ?? []).slice(-8).reverse()))
-      .catch(() => setReports([]))
+      .then((d) => setReports((d.reports ?? []).slice(0, 8)))
+      .catch(() => {})
       .finally(() => setLoading(false));
-  }, [refreshToken]);
+  };
+
+  useEffect(() => { loadReports(); }, [refreshToken, reportsBump]);
+
+  // Optimistic: prepend pending report immediately
+  const display = pendingReport
+    ? [pendingReport, ...reports.filter((r) => r.id !== pendingReport.id)].slice(0, 8)
+    : reports;
 
   return (
     <div className="border-t border-[#dde3ea] bg-white">
@@ -31,23 +38,29 @@ export default function ReportsFeed({ refreshToken }) {
           <FileText size={13} className="text-[#1a73e8]" />
           <h3 className="text-xs font-semibold text-[#1a1f2e]">Recent reports</h3>
         </div>
-        <span className="text-[10px] text-[#7b8fa1]">{reports.length} shown</span>
+        <span className="text-[10px] text-[#7b8fa1]">{display.length} shown</span>
       </div>
 
       <div className="max-h-[180px] overflow-y-auto divide-y divide-[#eef1f5]">
-        {loading ? (
+        {loading && display.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-4 text-xs text-[#7b8fa1]">
             <Loader2 size={12} className="animate-spin" /> Loading…
           </div>
-        ) : reports.length === 0 ? (
+        ) : display.length === 0 ? (
           <p className="px-4 py-4 text-xs text-[#7b8fa1] text-center">
             No reports yet. Seed demo or submit one as Citizen.
           </p>
         ) : (
-          reports.map((r) => (
-            <div key={r.id} className="px-4 py-2">
+          display.map((r) => (
+            <div
+              key={r.id || r.incident_id}
+              className={`px-4 py-2 ${r._optimistic ? "bg-[#f0f6ff]" : ""}`}
+            >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[10px] font-medium uppercase text-[#7b8fa1]">{r.source}</span>
+                <span className="text-[10px] font-medium uppercase text-[#7b8fa1]">
+                  {r.source || "text"}
+                  {r._optimistic && " · sending"}
+                </span>
                 <span className="text-[10px] text-[#7b8fa1]">{timeAgo(r.submitted_at)}</span>
               </div>
               <p className="mt-0.5 text-xs text-[#314154] line-clamp-2 leading-relaxed">

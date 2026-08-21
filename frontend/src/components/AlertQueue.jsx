@@ -73,6 +73,7 @@ function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvi
   const [loadingForecast, setLoadingForecast] = useState(false);
   const [action, setAction] = useState("");
   const [issuingAlert, setIssuingAlert] = useState(false);
+  const [actionError, setActionError] = useState("");
 
   const acknowledged = hotspot.acknowledged;
   const alertIssued = hotspot.alert_issued;
@@ -122,8 +123,14 @@ function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvi
 
   async function handleAcknowledgeClick() {
     if (!action.trim()) return;
-    await onAcknowledge(hotspot.h3_cell, action.trim());
-    onRefresh?.();
+    setActionError("");
+    try {
+      await onAcknowledge(hotspot.h3_cell, action.trim());
+      setAction("");
+      onRefresh?.();
+    } catch (err) {
+      setActionError(err.message || "Acknowledge failed — sign in as Verifier or Authority");
+    }
   }
 
   async function handleIssueAlert() {
@@ -262,24 +269,27 @@ function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvi
               )}
             </div>
           ) : canVerify ? (
-            <div className="flex gap-1.5">
-              <input
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
-                placeholder="Action taken, e.g. field team dispatched"
-                className="flex-1 rounded-lg border border-[#dde3ea] bg-white px-2.5 py-1.5 text-xs text-[#1a1f2e] placeholder:text-[#7b8fa1] focus:border-[#1a73e8] focus:outline-none"
-              />
-              <button
-                onClick={handleAcknowledgeClick}
-                disabled={!action.trim()}
-                className="rounded-lg bg-[#1a73e8] px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-              >
-                <Shield size={12} className="mr-0.5 inline" /> Ack
-              </button>
+            <div className="space-y-1.5">
+              <div className="flex gap-1.5">
+                <input
+                  value={action}
+                  onChange={(e) => setAction(e.target.value)}
+                  placeholder="Action taken, e.g. field team dispatched"
+                  className="flex-1 rounded-lg border border-[#dde3ea] bg-white px-2.5 py-1.5 text-xs text-[#1a1f2e] placeholder:text-[#7b8fa1] focus:border-[#1a73e8] focus:outline-none"
+                />
+                <button
+                  onClick={handleAcknowledgeClick}
+                  disabled={!action.trim()}
+                  className="rounded-lg bg-[#1a73e8] px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                >
+                  <Shield size={12} className="mr-0.5 inline" /> Ack
+                </button>
+              </div>
+              {actionError && <p className="text-[10px] text-[#e0524a]">{actionError}</p>}
             </div>
           ) : (
             <p className="text-[10px] text-[#7b8fa1]">
-              Sign in as Verifier or Authority to act.
+              Log in as <strong>Verifier</strong> or <strong>Authority</strong> to acknowledge hotspots.
             </p>
           )}
         </div>

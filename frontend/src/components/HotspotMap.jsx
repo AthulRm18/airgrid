@@ -1,35 +1,66 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Polygon, CircleMarker, Tooltip as LTooltip, useMap } from "react-leaflet";
 import { cellToBoundary } from "h3-js";
 import { SEVERITY } from "../lib/severity";
 import "leaflet/dist/leaflet.css";
 
-// Delhi-NCR center and zoom
 const MAP_CENTER = [28.63, 77.22];
 const MAP_ZOOM = 11;
+const BRICS_COLORS = { CN: "#e0524a", BR: "#4fb8ac", RU: "#e8a23d", ZA: "#a870e8", IN: "#1a73e8" };
 
 function h3Boundary(cell) {
   try {
-    const boundary = cellToBoundary(cell);
-    return boundary.map(([lat, lng]) => [lat, lng]);
+    return cellToBoundary(cell).map(([lat, lng]) => [lat, lng]);
   } catch {
     return null;
   }
 }
 
-export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpenEvidence }) {
+function isRecent(iso) {
+  if (!iso) return false;
+  return Date.now() - new Date(iso).getTime() < 5 * 60 * 1000;
+}
+
+/** One pin per H3 cell — avoids stacked blobs */
+function groupReportsByCell(reports) {
+  const byCell = new Map();
+  for (const r of reports) {
+    if (!r.h3_cell || !r.lat || !r.lng) continue;
+    const prev = byCell.get(r.h3_cell);
+    if (!prev || (r.submitted_at || "") > (prev.submitted_at || "")) {
+      byCell.set(r.h3_cell, r);
+    }
+  }
+  return [...byCell.values()];
+}
+
+export default function HotspotMap({
+  hotspots,
+  selectedCell,
+  onSelectCell,
+  onOpenEvidence,
+  refreshToken,
+  flashCells = [],
+  bricsEvents = [],
+}) {
   const [propagation, setPropagation] = useState(null);
   const [sensors, setSensors] = useState([]);
+  const [reports, setReports] = useState([]);
 
-  // Load ground sensors for map markers
   useEffect(() => {
     fetch("/api/sensors")
       .then((r) => r.ok ? r.json() : null)
-      .then((data) => setSensors(data?.readings ?? []))
+      .then((d) => setSensors(d?.readings ?? []))
       .catch(() => setSensors([]));
-  }, [hotspots.length]);
+  }, [refreshToken]);
 
-  // Load propagation when a cell is selected
+  useEffect(() => {
+    fetch("/api/citizen-reports")
+      .then((r) => r.ok ? r.json() : { reports: [] })
+      .then((d) => setReports(d.reports ?? []))
+      .catch(() => setReports([]));
+  }, [refreshToken]);
+
   useEffect(() => {
     if (!selectedCell) { setPropagation(null); return; }
     fetch(`/api/propagation/${selectedCell}`)
@@ -37,6 +68,12 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
       .then(setPropagation)
       .catch(() => setPropagation(null));
   }, [selectedCell]);
+
+  const hotspotByCell = useMemo(() => {
+    const m = {};
+    hotspots.forEach((h) => { m[h.h3_cell] = h; });
+    return m;
+  }, [hotspots]);
 
   const hexPolygons = useMemo(() =>
     hotspots.flatMap((h) => {
@@ -55,11 +92,35 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
     });
   }, [propagation]);
 
+  // Only show pins for recent reports in cells without a visible hotspot hex yet
+  const pendingPins = useMemo(() => {
+    const hexCells = new Set(hotspots.map((h) => h.h3_cell));
+    return groupReportsByCell(reports).filter(
+      (r) => isRecent(r.submitted_at) && !hexCells.has(r.h3_cell)
+    );
+  }, [reports, hotspots]);
+
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
-      {/* Thin legend strip */}
       <div className="flex shrink-0 items-center justify-between border-b border-[#dde3ea] bg-white px-4 py-2">
-        <span className="text-[11px] font-medium text-[#314154]">Pollution grid</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-medium text-[#314154]">Delhi-NCR pollution grid</span>
+          {bricsEvents.length > 0 && (
+            <div className="flex items-center gap-1">
+              {bricsEvents.map((ev) => (
+                <span
+                  key={ev.dedupe_key || ev.origin_country}
+                  className="rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
+                  style={{ background: BRICS_COLORS[ev.origin_country] || "#a870e8" }}
+                  title={`${ev.origin_country}: ${ev.evidence_summary}`}
+                >
+                  {ev.origin_country}
+                </span>
+              ))}
+              <span className="text-[9px] text-[#7b8fa1]">· BRICS feed (see panel)</span>
+            </div>
+          )}
+        </div>
         <Legend />
       </div>
 
@@ -68,15 +129,15 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
           center={MAP_CENTER}
           zoom={MAP_ZOOM}
           className="h-full w-full"
-          zoomControl={true}
-          attributionControl={true}
+          zoomControl
+          attributionControl
+          scrollWheelZoom
         >
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+            attribution="© OSM"
           />
 
-          {/* Propagation corridor (rendered UNDER hotspot hexes) */}
           {corridorPolygons.map((c) => {
             const intensity = c.predicted_intensity || 0.3;
             const color = intensity > 0.5 ? "#e87d3a" : intensity > 0.25 ? "#e8a23d" : "#e8c93d";
@@ -84,63 +145,29 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
               <Polygon
                 key={`prop-${c.h3_cell}`}
                 positions={c.positions}
-                pathOptions={{
-                  fillColor: color,
-                  fillOpacity: 0.25 + intensity * 0.2,
-                  color: color,
-                  weight: 1,
-                  opacity: 0.6,
-                }}
-              >
-                <LTooltip sticky>
-                  <div style={{ fontSize: 12 }}>
-                    <strong>Predicted exposure</strong><br />
-                    Intensity: {(intensity * 100).toFixed(0)}%<br />
-                    Arrival: ~{c.hours_to_impact}h
-                  </div>
-                </LTooltip>
-              </Polygon>
+                pathOptions={{ fillColor: color, fillOpacity: 0.2, color, weight: 1, opacity: 0.5 }}
+              />
             );
           })}
 
-          {/* Ground sensor stations */}
-          {sensors.map((s) => (
-            <CircleMarker
-              key={`sensor-${s.station_name}-${s.lat}`}
-              center={[s.lat, s.lng]}
-              radius={6}
-              pathOptions={{
-                fillColor: "#4fb8ac",
-                fillOpacity: 0.9,
-                color: "#fff",
-                weight: 1.5,
-              }}
-            >
-              <LTooltip>
-                <div style={{ fontSize: 12 }}>
-                  <strong>{s.station_name}</strong><br />
-                  PM2.5: {s.pm25?.toFixed?.(1) ?? s.pm25} µg/m³<br />
-                  <span style={{ color: "#888" }}>{s.source === "openaq_mock" ? "Demo sensor data" : "OpenAQ"}</span>
-                </div>
-              </LTooltip>
-            </CircleMarker>
-          ))}
-
-          {/* Hotspot hex cells */}
           {hexPolygons.map((h) => {
             const isSelected = selectedCell === h.h3_cell;
+            const isFlashing = flashCells.includes(h.h3_cell);
             const sev = SEVERITY[h.severity] ?? SEVERITY.unverified;
-            const rawColor = sev.rawColor;
+            const isHidden = h.severity === "hidden";
+            const isConfirmed = h.severity === "confirmed";
+
             return (
               <Polygon
                 key={h.h3_cell}
                 positions={h.positions}
                 pathOptions={{
-                  fillColor: rawColor,
-                  fillOpacity: isSelected ? 0.55 : 0.32,
-                  color: rawColor,
-                  weight: isSelected ? 3 : 1.5,
-                  opacity: isSelected ? 1 : 0.7,
+                  fillColor: sev.rawColor,
+                  fillOpacity: isSelected ? 0.65 : isFlashing ? 0.6 : isHidden ? 0.45 : 0.35,
+                  color: isFlashing ? "#fff" : isSelected ? "#1a73e8" : sev.rawColor,
+                  weight: isSelected ? 3.5 : isFlashing ? 3 : 1.5,
+                  opacity: 1,
+                  className: isFlashing ? "hex-flash" : isHidden ? "hex-pulse" : "",
                 }}
                 eventHandlers={{
                   click: () => onSelectCell(h.h3_cell),
@@ -148,98 +175,129 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
                 }}
               >
                 <LTooltip sticky>
-                  <div style={{ fontSize: 12, maxWidth: 220 }}>
-                    <strong>{sev.label}</strong>{" "}
-                    <span style={{ fontFamily: "monospace", fontSize: 10, color: "#888" }}>
-                      {h.h3_cell}
-                    </span>
-                    <br />
-                    {h.confidence_score != null && (
-                      <>Confidence: {(h.confidence_score * 100).toFixed(0)}%<br /></>
+                  <div style={{ fontSize: 12, maxWidth: 240, padding: "2px 0" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        backgroundColor: sev.rawColor
+                      }} />
+                      <strong>{sev.label}</strong>
+                    </div>
+                    {isHidden && (
+                      <div style={{ background: "#f3ebfc", color: "#6b21a8", padding: "3px 6px", borderRadius: 4, fontSize: 11, marginBottom: 4, fontWeight: 600 }}>
+                        ⚠️ Blind Spot: Zero ground sensors!
+                      </div>
                     )}
-                    {h.sensor_pm25 != null && <>PM2.5: {h.sensor_pm25} µg/m³<br /></>}
-                    {h.citizen_report_count > 0 && <>{h.citizen_report_count} citizen report(s)<br /></>}
-                    <span style={{ fontSize: 11, color: "#aaa" }}>{h.explanation}</span>
+                    {h.confidence_score != null && (
+                      <div style={{ fontSize: 11, color: "#314154", marginBottom: 2 }}>
+                        Confidence: <strong>{(h.confidence_score * 100).toFixed(0)}%</strong>
+                      </div>
+                    )}
+                    {h.citizen_report_count > 0 && (
+                      <div style={{ fontSize: 11, color: "#314154", marginBottom: 2 }}>
+                        👥 {h.citizen_report_count} citizen report(s)
+                      </div>
+                    )}
+                    {h.explanation && (
+                      <div style={{ fontSize: 11, color: "#5f6f86", borderTop: "1px solid #eef1f5", paddingTop: 4, marginTop: 4 }}>
+                        {h.explanation.slice(0, 140)}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 10, color: "#1a73e8", marginTop: 4, fontWeight: 500 }}>
+                      👉 Click for plume spread · Double-click for evidence
+                    </div>
                   </div>
                 </LTooltip>
               </Polygon>
             );
           })}
 
-          {/* Wind direction indicator (if propagation loaded) */}
-          {propagation?.weather && selectedCell && (
-            <WindArrow
-              lat={propagation.weather.lat}
-              lng={propagation.weather.lng}
-              direction={propagation.weather.wind_direction_deg}
-              speed={propagation.weather.wind_speed_kmh}
-            />
-          )}
+          {/* Pending report — small fixed pin, only before hex appears */}
+          {pendingPins.map((r) => (
+            <CircleMarker
+              key={r.id || `pending-${r.lat}-${r.lng}`}
+              center={[r.lat, r.lng]}
+              radius={6}
+              pathOptions={{
+                fillColor: "#1a73e8",
+                fillOpacity: 0.9,
+                color: "#fff",
+                weight: 2,
+              }}
+            >
+              <LTooltip>
+                <div style={{ fontSize: 11 }}>
+                  <strong>📍 New Citizen Report</strong><br />
+                  Cross-referencing satellite & ground telemetry…
+                </div>
+              </LTooltip>
+            </CircleMarker>
+          ))}
 
-          <FitBounds hotspots={hotspots} />
+          {sensors.map((s) => (
+            <CircleMarker
+              key={`sensor-${s.station_name}-${s.lat}`}
+              center={[s.lat, s.lng]}
+              radius={5}
+              pathOptions={{ fillColor: "#4fb8ac", fillOpacity: 0.9, color: "#fff", weight: 1.5 }}
+            >
+              <LTooltip>
+                <div style={{ fontSize: 11 }}>
+                  <strong>📡 {s.station_name}</strong><br />
+                  PM2.5: <strong>{s.pm25} µg/m³</strong><br />
+                  <span style={{ color: "#888", fontSize: 10 }}>{s.source === "openaq" ? "OpenAQ live station" : "Ground station"}</span>
+                </div>
+              </LTooltip>
+            </CircleMarker>
+          ))}
+
+          <InitialFit hotspots={hotspots} />
         </MapContainer>
       </div>
-
-      {(hotspots.length === 0 && sensors.length === 0) && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <p className="rounded-lg bg-white/90 px-3 py-1.5 text-xs text-[#7b8fa1] shadow-sm">
-            Loading… or click Seed demo if the backend just started.
-          </p>
-        </div>
-      )}
     </div>
   );
 }
 
-function WindArrow({ lat, lng, direction, speed }) {
-  // The arrow points in the direction pollution MOVES (wind_from + 180)
-  const pollutionDir = (direction + 180) % 360;
-  return (
-    <CircleMarker
-      center={[lat, lng]}
-      radius={0}
-    >
-      <LTooltip permanent direction="top" className="wind-tooltip">
-        <div style={{ fontSize: 11, textAlign: "center", whiteSpace: "nowrap" }}>
-          <span style={{ display: "inline-block", transform: `rotate(${pollutionDir}deg)`, fontSize: 16 }}>
-            ↑
-          </span>{" "}
-          {speed} km/h
-        </div>
-      </LTooltip>
-    </CircleMarker>
-  );
-}
-
-
-function FitBounds({ hotspots }) {
+function InitialFit({ hotspots }) {
   const map = useMap();
+  const fittedRef = useRef(false);
+
   useEffect(() => {
-    if (hotspots.length === 0) return;
-    const lats = hotspots.map((h) => h.lat);
-    const lngs = hotspots.map((h) => h.lng);
-    const bounds = [
-      [Math.min(...lats) - 0.02, Math.min(...lngs) - 0.02],
-      [Math.max(...lats) + 0.02, Math.max(...lngs) + 0.02],
-    ];
-    map.fitBounds(bounds, { padding: [20, 20], maxZoom: 12 });
-  }, [hotspots.length]); // only on initial load
+    // Only fit bounds ONCE on first non-empty hotspots load, to avoid interrupting manual zoom/pan
+    if (fittedRef.current || !hotspots || hotspots.length === 0) return;
+    fittedRef.current = true;
+    const lats = hotspots.map((h) => h.lat).filter(Boolean);
+    const lngs = hotspots.map((h) => h.lng).filter(Boolean);
+    if (lats.length === 0 || lngs.length === 0) return;
+
+    try {
+      map.fitBounds([
+        [Math.min(...lats) - 0.02, Math.min(...lngs) - 0.02],
+        [Math.max(...lats) + 0.02, Math.max(...lngs) + 0.02],
+      ], { padding: [24, 24], maxZoom: 12 });
+    } catch {
+      /* ignore map fit race condition */
+    }
+  }, [hotspots, map]);
+
   return null;
 }
 
-
 function Legend() {
   return (
-    <div className="flex flex-wrap gap-3 text-[11px] text-[#7b8fa1]">
+    <div className="flex flex-wrap items-center gap-2.5 text-[10px] text-[#7b8fa1]">
       {Object.entries(SEVERITY).map(([key, s]) => (
-        <span key={key} className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: s.rawColor }} />
-          {s.label}
+        <span key={key} className="flex items-center gap-1">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: s.rawColor }} />
+          <span>{s.label}</span>
         </span>
       ))}
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: "#e87d3a" }} />
-        Spread
+      <span className="flex items-center gap-1 border-l border-[#dde3ea] pl-2">
+        <span className="inline-block h-2 w-2 rounded-full bg-[#4fb8ac]" />
+        OpenAQ station
       </span>
     </div>
   );

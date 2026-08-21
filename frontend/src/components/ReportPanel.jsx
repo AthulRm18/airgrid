@@ -20,30 +20,39 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
   const [recording, setRecording] = useState(false);
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const recognitionRef = useRef(null);
+  const submitAbortRef = useRef(null);
 
   const coords = LOCATIONS[locationIdx];
-  const canSubmit = useMemo(() => Boolean(text.trim() || photo), [text, photo]);
+  const canSubmit = useMemo(() => Boolean(text.trim() || photo) && !submitting, [text, photo, submitting]);
 
   function startVoice() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Voice input requires Chrome.");
+      alert("Voice input requires Chrome or Edge browser.");
       return;
     }
+    setSubmitError("");
+    setLastResult(null);
     const rec = new SpeechRecognition();
     rec.continuous = false;
     rec.interimResults = false;
+    rec.lang = "hi-IN";
     recognitionRef.current = rec;
     rec.onstart = () => setRecording(true);
     rec.onend = () => setRecording(false);
     rec.onresult = async (event) => {
       const transcript = event.results[0][0].transcript;
+      setText(transcript);
+      setLastResult(null);
       setVoiceProcessing(true);
       try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 12000);
         const res = await fetch("/api/voice-transcript", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ transcript }),
+          signal: ctrl.signal,
         });
         if (res.ok) {
           const data = await res.json();
@@ -51,16 +60,17 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
           if (data.extracted_location_hint && !locationHint) {
             setLocationHint(data.extracted_location_hint);
           }
-        } else {
-          setText(transcript);
         }
       } catch {
-        setText(transcript);
+        /* keep raw transcript already set */
       } finally {
         setVoiceProcessing(false);
       }
     };
-    rec.onerror = () => setRecording(false);
+    rec.onerror = () => {
+      setRecording(false);
+      setVoiceProcessing(false);
+    };
     rec.start();
   }
 
@@ -70,7 +80,13 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
   }
 
   async function submitIncident() {
-    if (!canSubmit) return;
+    if (!text.trim() && !photo) return;
+    if (submitting) return;
+
+    submitAbortRef.current?.abort();
+    const controller = new AbortController();
+    submitAbortRef.current = controller;
+
     setSubmitting(true);
     setSubmitError("");
     setLastResult(null);
@@ -83,9 +99,9 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
     form.append("country_code", session?.country_code || "IN");
     if (photo) form.append("file", photo);
 
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
       const headers = sessionToken ? { "X-Session-Token": sessionToken } : undefined;
       const res = await fetch("/api/incidents/report", {
         method: "POST", body: form, headers, signal: controller.signal,
@@ -97,10 +113,13 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
       setText("");
       setLocationHint("");
       setPhoto(null);
-      onReportSubmitted();
+      onReportSubmitted(data);
     } catch (err) {
-      setSubmitError(err?.message || "Could not submit. Please retry.");
+      if (err.name !== "AbortError") {
+        setSubmitError(err?.message || "Could not submit. Please retry.");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setSubmitting(false);
     }
   }
@@ -113,7 +132,11 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
         <div className="relative">
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              setText(e.target.value);
+              if (lastResult) setLastResult(null);
+              if (submitError) setSubmitError("");
+            }}
             placeholder="Describe smoke, haze, or smell…"
             rows={2}
             className="w-full rounded-lg border border-[#dde3ea] px-3 py-2 pr-10 text-sm text-[#1a1f2e] placeholder:text-[#7b8fa1] focus:border-[#1a73e8] focus:outline-none resize-none"
@@ -121,7 +144,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
           <button
             type="button"
             onClick={recording ? stopVoice : startVoice}
-            disabled={voiceProcessing}
+            disabled={recording && voiceProcessing}
             className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#f0f4f9] disabled:opacity-40"
             title={recording ? "Stop" : "Voice"}
           >
@@ -134,6 +157,10 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
             )}
           </button>
         </div>
+
+        {voiceProcessing && (
+          <p className="text-[10px] text-[#1a73e8]">Translating voice with Gemini…</p>
+        )}
 
         <select
           value={locationIdx}
@@ -167,10 +194,11 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
         </label>
       </div>
 
-      <div className="mt-2 flex items-center justify-end">
+      <div className="mt-2 flex items-center justify-end gap-2">
+        {submitting && <span className="text-[10px] text-[#7b8fa1]">Submitting…</span>}
         <button
           onClick={submitIncident}
-          disabled={submitting || !canSubmit}
+          disabled={!canSubmit}
           className="inline-flex items-center gap-1 rounded-full bg-[#1a73e8] px-3.5 py-1.5 text-xs font-medium text-white disabled:opacity-50"
         >
           {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
@@ -182,11 +210,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
       {lastResult && (
         <div className="mt-2 rounded-lg border border-[rgba(26,115,232,0.2)] bg-[rgba(26,115,232,0.06)] px-3 py-2">
           <p className="flex items-center gap-1.5 text-xs font-medium text-[#1a73e8]">
-            <CheckCircle2 size={12} /> Report submitted
-          </p>
-          <p className="mt-0.5 text-[10px] text-[#5f6f86]">
-            Zone {lastResult.h3_cell?.slice(0, 10)}…
-            {lastResult.combined_haze_score != null && ` · ${Math.round(lastResult.combined_haze_score * 100)}% haze`}
+            <CheckCircle2 size={12} /> Report submitted — check map for your zone
           </p>
         </div>
       )}

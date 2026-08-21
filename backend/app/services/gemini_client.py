@@ -22,13 +22,14 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_BACKEND_ROOT / ".env")
 
 # Primary model can be overridden via GEMINI_MODEL.
-# Keep a fallback list with broadly-available model IDs.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Keep a fallback list with active, fast Gemini models.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 MODEL_CANDIDATES = [
     MODEL,
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-1.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
 ]
 _DISCOVERED_MODELS: list[str] = []
 

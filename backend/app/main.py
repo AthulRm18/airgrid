@@ -131,7 +131,7 @@ _HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
 _EVIDENCE_CACHE: dict[str, dict] = {}
 _OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "8"))
 _EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "30"))
-_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "45"))
+_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "8"))
 
 
 @app.on_event("startup")
@@ -154,6 +154,11 @@ async def _train_forecast_on_startup():
         print(f"[VIGIL] Sensor cache primed ({len(seeded_readings)} readings, source={source}).")
     except Exception as exc:
         print(f"[VIGIL] Sensor cache prime skipped: {exc}")
+
+    # Restore persisted BRICS events from previous session
+    persisted = fb.get_federated_events()
+    if persisted:
+        FEDERATED_EVENTS.extend(persisted)
 
     # Auto-seed demo scenario so the dashboard is never empty on first load.
     if os.environ.get("DEMO_AUTO_SEED", "true").lower() in ("1", "true", "yes"):
@@ -546,17 +551,32 @@ async def submit_incident(
     haze_candidates: list[float] = []
 
     if text:
-        text_classification = await asyncio.to_thread(gemini_client.classify_text_report, text)
+        try:
+            text_classification = await asyncio.wait_for(
+                asyncio.to_thread(gemini_client.classify_text_report, text),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            text_classification = {
+                "haze_score": 0.55, "event_type": "smoke", "severity": "moderate",
+                "translated_text": text, "detected_language": "Unknown",
+            }
         if text_classification.get("haze_score") is not None:
             haze_candidates.append(float(text_classification["haze_score"]))
 
     if file is not None:
         image_bytes = await file.read()
-        photo_classification = await asyncio.to_thread(
-            gemini_client.score_photo,
-            image_bytes,
-            file.content_type or "image/jpeg",
-        )
+        try:
+            photo_classification = await asyncio.wait_for(
+                asyncio.to_thread(
+                    gemini_client.score_photo,
+                    image_bytes,
+                    file.content_type or "image/jpeg",
+                ),
+                timeout=12.0,
+            )
+        except asyncio.TimeoutError:
+            photo_classification = {"haze_score": 0.5, "notes": "Photo analysis timed out"}
         if photo_classification.get("haze_score") is not None:
             haze_candidates.append(float(photo_classification["haze_score"]))
 
@@ -576,10 +596,12 @@ async def submit_incident(
 
     incident = {
         "incident_id": incident_id,
+        "id": record["id"],
         "country_code": normalized_country,
         "lat": lat,
         "lng": lng,
         "h3_cell": record["h3_cell"],
+        "text": text,
         "location_hint": location_hint or None,
         "reporter": _public_user(reporter) if reporter else None,
         "submitted_at": record["submitted_at"],
@@ -604,7 +626,8 @@ async def list_incidents():
 @app.get("/api/citizen-reports")
 async def list_citizen_reports():
     reports = fb.get_all_citizen_reports()
-    return {"count": len(reports), "reports": reports[-50:]}
+    reports.sort(key=lambda r: r.get("submitted_at", ""), reverse=True)
+    return {"count": len(reports), "reports": reports[:50]}
 
 
 # ---------------------------------------------------------------------------
@@ -709,7 +732,9 @@ async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/hotspots/{h3_cell}/evidence")
-async def get_evidence(h3_cell: str):
+async def get_evidence(h3_cell: str, fast: bool = False):
+    if fast:
+        return await _build_evidence_payload(h3_cell, skip_ai=True)
     return await _get_evidence_cached(h3_cell, max_age_seconds=_EVIDENCE_CACHE_TTL_SECONDS)
 
 
@@ -1037,6 +1062,7 @@ async def seed_demo():
     _SATELLITE_CACHE.clear()
     _invalidate_runtime_caches(clear_satellite=False)
     FEDERATED_EVENTS.clear()
+    fb.clear_federated_events()
 
     # Step 1: Seed citizen reports (fast — skip Gemini with is_demo=True)
     demo_reports = demo_scenario.get_demo_reports()
@@ -1051,8 +1077,9 @@ async def seed_demo():
         result = await submit_report(report)
         seeded.append(result)
 
-    # Step 2: Force hotspot recalculation so cells exist
-    await get_hotspots()
+    # Step 2: Prime satellite overrides (skip slow full hotspot recalc — frontend will poll)
+    for cell, score in demo_scenario.DEMO_SATELLITE_OVERRIDES.items():
+        _SATELLITE_CACHE[cell] = score
     now_iso = datetime.now(timezone.utc).isoformat()
 
     # Step 3: Pre-acknowledge primary hotspot (simulates verifier action)
@@ -1065,12 +1092,16 @@ async def seed_demo():
     issued["issued_at"] = now_iso
     fb.set_issued_alert(demo_scenario.DEMO_PRIMARY_CELL, issued)
 
-    # Step 5: Inject BRICS federated event
-    brics_event = demo_scenario.DEMO_BRICS_EVENT.copy()
-    brics_event["timestamp"] = now_iso
-    brics_event["ingested_at"] = now_iso
-    brics_event["dedupe_key"] = f"CN:{brics_event['h3_cell']}:{now_iso}"
-    FEDERATED_EVENTS.append(brics_event)
+    # Step 5: Inject BRICS federated events (all partner countries)
+    brics_count = 0
+    for evt in demo_scenario.DEMO_BRICS_EVENTS:
+        brics_event = evt.copy()
+        brics_event["timestamp"] = now_iso
+        brics_event["ingested_at"] = now_iso
+        brics_event["dedupe_key"] = f"{brics_event['origin_country']}:{brics_event['h3_cell']}:{now_iso}"
+        FEDERATED_EVENTS.append(brics_event)
+        brics_count += 1
+    fb.save_federated_events(FEDERATED_EVENTS)
 
     _invalidate_runtime_caches(clear_satellite=False)
     _DEMO_SEEDED = True
@@ -1079,7 +1110,7 @@ async def seed_demo():
         "seeded": len(seeded),
         "acknowledged": demo_scenario.DEMO_PRIMARY_CELL,
         "alert_issued": demo_scenario.DEMO_PRIMARY_CELL,
-        "brics_events": 1,
+        "brics_events": brics_count,
         "reports": [{"h3_cell": r["h3_cell"], "source": r["source"]} for r in seeded],
     }
 
@@ -1231,7 +1262,7 @@ async def _get_evidence_cached(h3_cell: str, max_age_seconds: float = 20.0):
     return payload
 
 
-async def _build_evidence_payload(h3_cell: str):
+async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
     hotspots = await _get_hotspots_cached(max_age_seconds=12.0)
     match = next((h for h in hotspots["hotspots"] if h["h3_cell"] == h3_cell), None)
     if match is None:
@@ -1283,46 +1314,61 @@ async def _build_evidence_payload(h3_cell: str):
         "forecast_spike": spike_info,
     }
 
-    try:
-        incident_result, recommendation_result = await asyncio.wait_for(
-            asyncio.gather(
-                asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
-                asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),
-                return_exceptions=True,
-            ),
-            timeout=_GEMINI_EVIDENCE_TIMEOUT_SECONDS,
+    if skip_ai or not os.environ.get("GEMINI_API_KEY"):
+        incident_explanation = gemini_client._mock_incident_explanation(
+            explanation_data,
+            fallback_reason="fast_mode" if skip_ai else "missing_api_key",
         )
-    except asyncio.TimeoutError:
-        incident_result = asyncio.TimeoutError()
-        recommendation_result = asyncio.TimeoutError()
-
-    if isinstance(incident_result, Exception):
-        if isinstance(incident_result, asyncio.TimeoutError):
-            incident_explanation = gemini_client._mock_incident_explanation(
-                explanation_data,
-                fallback_reason="gemini_timeout",
-            )
-        else:
-            incident_explanation = gemini_client._mock_incident_explanation(
-                explanation_data,
-                fallback_reason=f"gemini_error: {str(incident_result)[:120]}",
-            )
+        if match.get("explanation"):
+            incident_explanation["summary"] = match["explanation"]
+        recommendation = gemini_client._mock_recommendation(
+            rec_data,
+            fallback_reason="fast_mode" if skip_ai else "missing_api_key",
+        )
     else:
-        incident_explanation = incident_result
+        try:
+            incident_result, recommendation_result = await asyncio.wait_for(
+                asyncio.gather(
+                    asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
+                    asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),
+                    return_exceptions=True,
+                ),
+                timeout=_GEMINI_EVIDENCE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            incident_result = asyncio.TimeoutError()
+            recommendation_result = asyncio.TimeoutError()
 
-    if isinstance(recommendation_result, Exception):
-        if isinstance(recommendation_result, asyncio.TimeoutError):
-            recommendation = gemini_client._mock_recommendation(
-                rec_data,
-                fallback_reason="gemini_timeout",
-            )
+        if isinstance(incident_result, Exception):
+            if isinstance(incident_result, asyncio.TimeoutError):
+                incident_explanation = gemini_client._mock_incident_explanation(
+                    explanation_data,
+                    fallback_reason="gemini_timeout",
+                )
+            else:
+                incident_explanation = gemini_client._mock_incident_explanation(
+                    explanation_data,
+                    fallback_reason=f"gemini_error: {str(incident_result)[:120]}",
+                )
         else:
-            recommendation = gemini_client._mock_recommendation(
-                rec_data,
-                fallback_reason=f"gemini_error: {str(recommendation_result)[:120]}",
-            )
-    else:
-        recommendation = recommendation_result
+            incident_explanation = incident_result
+
+        if isinstance(recommendation_result, Exception):
+            if isinstance(recommendation_result, asyncio.TimeoutError):
+                recommendation = gemini_client._mock_recommendation(
+                    rec_data,
+                    fallback_reason="gemini_timeout",
+                )
+            else:
+                recommendation = gemini_client._mock_recommendation(
+                    rec_data,
+                    fallback_reason=f"gemini_error: {str(recommendation_result)[:120]}",
+                )
+        else:
+            recommendation = recommendation_result
+
+        if match.get("explanation") and "template explanation" in str(incident_explanation.get("confidence_note", "")).lower():
+            incident_explanation["summary"] = match["explanation"]
 
     eb = match.get("evidence_breakdown", {})
     evidence_checklist = []
