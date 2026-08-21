@@ -153,7 +153,10 @@ async def _train_forecast_on_startup():
 
     # Prime sensor cache early so dashboard's first load can use real readings.
     try:
-        seeded_readings = await openaq_client.fetch_all_readings("76.8,28.4,77.6,28.9")
+        seeded_readings = await asyncio.wait_for(
+            openaq_client.fetch_all_readings("76.8,28.4,77.6,28.9"),
+            timeout=3.0
+        )
         source = seeded_readings[0].get("source") if seeded_readings else "none"
         print(f"[CONFLUX] Sensor cache primed ({len(seeded_readings)} readings, source={source}).")
     except Exception as exc:
