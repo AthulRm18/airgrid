@@ -27,18 +27,28 @@ OPENAQ_BASE_URL = "https://api.openaq.org/v3"
 
 # Fail fast during local demos: if live OpenAQ is slow/unreachable,
 # immediately fall back to deterministic mock readings.
-OPENAQ_REQUEST_TIMEOUT = float(os.environ.get("OPENAQ_REQUEST_TIMEOUT", "8"))
-OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "30"))
+OPENAQ_REQUEST_TIMEOUT = float(os.environ.get("OPENAQ_REQUEST_TIMEOUT", "6"))
+OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "12"))
 OPENAQ_LOCATIONS_LIMIT = int(os.environ.get("OPENAQ_LOCATIONS_LIMIT", "8"))
 OPENAQ_MAX_CONCURRENCY = int(os.environ.get("OPENAQ_MAX_CONCURRENCY", "8"))
 OPENAQ_REAL_CACHE_TTL_SECONDS = float(os.environ.get("OPENAQ_REAL_CACHE_TTL_SECONDS", "1800"))
 
 _LAST_REAL_READINGS: list[dict] = []
 _LAST_REAL_READINGS_TS: float = 0.0
+_FORCE_MOCK = False  # set True after 401/403 so we stop hammering a dead key
 
 
 def _get_api_key() -> Optional[str]:
+    if _FORCE_MOCK:
+        return None
     return os.environ.get("OPENAQ_API_KEY")
+
+
+def _mark_key_invalid(reason: str):
+    global _FORCE_MOCK
+    if not _FORCE_MOCK:
+        _FORCE_MOCK = True
+        print(f"[OpenAQ] API key rejected ({reason}) — using demo sensors until you set a new OPENAQ_API_KEY.")
 
 
 async def fetch_locations(bbox: str, limit: int = OPENAQ_LOCATIONS_LIMIT) -> list[dict]:
@@ -60,6 +70,9 @@ async def fetch_locations(bbox: str, limit: int = OPENAQ_LOCATIONS_LIMIT) -> lis
             )
 
         resp = await asyncio.to_thread(_call)
+        if resp.status_code in (401, 403):
+            _mark_key_invalid(f"HTTP {resp.status_code}")
+            return _mock_locations(bbox, limit)
         resp.raise_for_status()
         return resp.json().get("results", [])
     except Exception:
@@ -86,6 +99,9 @@ async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
             )
 
         resp = await asyncio.to_thread(_call)
+        if resp.status_code in (401, 403):
+            _mark_key_invalid(f"HTTP {resp.status_code}")
+            return _mock_measurements(location_id)
         resp.raise_for_status()
         raw = resp.json().get("results", [])
     except Exception:

@@ -129,9 +129,9 @@ _SATELLITE_CACHE: dict[str, float] = {}
 _DEMO_SEEDED = False
 _HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
 _EVIDENCE_CACHE: dict[str, dict] = {}
-_OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "8"))
-_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "30"))
-_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "8"))
+_OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "20"))
+_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "60"))
+_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "25"))
 
 
 @app.on_event("startup")
@@ -429,17 +429,23 @@ async def get_sensors(bbox: str = "76.8,28.4,77.6,28.9"):
 async def get_data_sources():
     """Transparency panel: which integrations are live vs demo fallback."""
     use_ee = os.environ.get("USE_EARTH_ENGINE", "false").lower() in ("1", "true", "yes")
-    has_openaq = bool(os.environ.get("OPENAQ_API_KEY"))
-    has_gemini = bool(os.environ.get("GEMINI_API_KEY"))
+    has_openaq = bool(os.environ.get("OPENAQ_API_KEY")) and not getattr(openaq_client, "_FORCE_MOCK", False)
+    has_gemini = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
+    ee_status = {"ok": False}
+    if use_ee:
+        ee_status = earth_engine_client.status()
     return {
         "local_country": LOCAL_COUNTRY,
         "brics_mode": "enabled",
         "openaq": "configured" if has_openaq else "mock_fallback",
         "gemini": "configured" if has_gemini else "mock_fallback",
-        "earth_engine": "enabled" if use_ee else "mock_fallback",
+        "earth_engine": "enabled" if ee_status.get("ok") else ("needs_iam" if use_ee else "mock_fallback"),
+        "earth_engine_detail": ee_status.get("detail"),
+        "earth_engine_hint": ee_status.get("hint"),
         "weather": "mock_fallback",
         "population": "demo_estimates",
         "demo_auto_seed": os.environ.get("DEMO_AUTO_SEED", "true"),
+        "gcp_project": os.environ.get("GCP_PROJECT_ID") or None,
     }
 
 
@@ -532,6 +538,8 @@ async def submit_incident(
     text: str = Form(default=""),
     location_hint: str = Form(default=""),
     country_code: str = Form(default=LOCAL_COUNTRY),
+    haze_score: float | None = Form(default=None),
+    skip_gemini: str = Form(default="false"),
     file: UploadFile | None = File(default=None),
     x_session_token: str | None = Header(default=None),
 ):
@@ -549,12 +557,24 @@ async def submit_incident(
     text_classification = None
     photo_classification = None
     haze_candidates: list[float] = []
+    use_preclassified = skip_gemini.lower() in ("1", "true", "yes") and haze_score is not None
 
-    if text:
+    if use_preclassified:
+        # Voice path already ran Gemini — skip a second round-trip
+        haze_candidates.append(float(haze_score))
+        text_classification = {
+            "haze_score": float(haze_score),
+            "event_type": "smoke",
+            "severity": "high" if float(haze_score) >= 0.7 else "moderate",
+            "translated_text": text,
+            "detected_language": "preclassified",
+            "confidence": 0.85,
+        }
+    elif text:
         try:
             text_classification = await asyncio.wait_for(
                 asyncio.to_thread(gemini_client.classify_text_report, text),
-                timeout=10.0,
+                timeout=8.0,
             )
         except asyncio.TimeoutError:
             text_classification = {
@@ -573,7 +593,7 @@ async def submit_incident(
                     image_bytes,
                     file.content_type or "image/jpeg",
                 ),
-                timeout=12.0,
+                timeout=10.0,
             )
         except asyncio.TimeoutError:
             photo_classification = {"haze_score": 0.5, "notes": "Photo analysis timed out"}

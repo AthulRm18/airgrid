@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Loader2, Mic, MicOff, Send, UploadCloud, MapPin } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { CheckCircle2, Loader2, Mic, MicOff, Send, UploadCloud, MapPin, X } from "lucide-react";
 
 const LOCATIONS = [
   { label: "Anand Vihar, Delhi", lat: 28.6469, lng: 77.3157 },
@@ -19,16 +19,20 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
   const [lastResult, setLastResult] = useState(null);
   const [recording, setRecording] = useState(false);
   const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const [voiceMeta, setVoiceMeta] = useState(null);
   const recognitionRef = useRef(null);
   const submitAbortRef = useRef(null);
 
   const coords = LOCATIONS[locationIdx];
-  const canSubmit = useMemo(() => Boolean(text.trim() || photo) && !submitting, [text, photo, submitting]);
+  const canSubmit = useMemo(
+    () => Boolean(text.trim() || photo) && !submitting && !recording,
+    [text, photo, submitting, recording],
+  );
 
   function startVoice() {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert("Voice input requires Chrome or Edge browser.");
+      alert("Voice input requires Chrome or Edge.");
       return;
     }
     setSubmitError("");
@@ -47,7 +51,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
       setVoiceProcessing(true);
       try {
         const ctrl = new AbortController();
-        setTimeout(() => ctrl.abort(), 12000);
+        setTimeout(() => ctrl.abort(), 10000);
         const res = await fetch("/api/voice-transcript", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -57,12 +61,17 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
         if (res.ok) {
           const data = await res.json();
           setText(data.translated || transcript);
-          if (data.extracted_location_hint && !locationHint) {
+          setVoiceMeta({
+            haze_score: data.haze_score,
+            event_type: data.event_type,
+            severity: data.severity,
+          });
+          if (data.extracted_location_hint) {
             setLocationHint(data.extracted_location_hint);
           }
         }
       } catch {
-        /* keep raw transcript already set */
+        setVoiceMeta(null);
       } finally {
         setVoiceProcessing(false);
       }
@@ -79,6 +88,12 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
     setRecording(false);
   }
 
+  function cancelSubmit() {
+    submitAbortRef.current?.abort();
+    setSubmitting(false);
+    setSubmitError("Submit cancelled — try again");
+  }
+
   async function submitIncident() {
     if (!text.trim() && !photo) return;
     if (submitting) return;
@@ -87,6 +102,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
     const controller = new AbortController();
     submitAbortRef.current = controller;
 
+    const submittedText = text.trim();
     setSubmitting(true);
     setSubmitError("");
     setLastResult(null);
@@ -94,12 +110,17 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
     const form = new FormData();
     form.append("lat", String(coords.lat));
     form.append("lng", String(coords.lng));
-    form.append("text", text.trim());
+    form.append("text", submittedText);
     form.append("location_hint", locationHint.trim() || coords.label);
     form.append("country_code", session?.country_code || "IN");
+    // Reuse voice Gemini result so submit doesn't wait on a second Gemini call
+    if (voiceMeta?.haze_score != null) {
+      form.append("haze_score", String(voiceMeta.haze_score));
+      form.append("skip_gemini", "true");
+    }
     if (photo) form.append("file", photo);
 
-    const timeoutId = setTimeout(() => controller.abort(), 25000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     try {
       const headers = sessionToken ? { "X-Session-Token": sessionToken } : undefined;
@@ -109,13 +130,18 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
       clearTimeout(timeoutId);
       if (!res.ok) throw new Error(`Submit failed (${res.status})`);
       const data = await res.json();
+      // Ensure feed gets the text even if backend omits it
+      if (!data.text) data.text = submittedText;
       setLastResult(data);
       setText("");
       setLocationHint("");
       setPhoto(null);
+      setVoiceMeta(null);
       onReportSubmitted(data);
     } catch (err) {
-      if (err.name !== "AbortError") {
+      if (err.name === "AbortError") {
+        setSubmitError("Timed out — check Gemini/OpenAQ keys or try again");
+      } else {
         setSubmitError(err?.message || "Could not submit. Please retry.");
       }
     } finally {
@@ -134,6 +160,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
             value={text}
             onChange={(e) => {
               setText(e.target.value);
+              setVoiceMeta(null);
               if (lastResult) setLastResult(null);
               if (submitError) setSubmitError("");
             }}
@@ -144,7 +171,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
           <button
             type="button"
             onClick={recording ? stopVoice : startVoice}
-            disabled={recording && voiceProcessing}
+            disabled={voiceProcessing || submitting}
             className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#f0f4f9] disabled:opacity-40"
             title={recording ? "Stop" : "Voice"}
           >
@@ -159,7 +186,12 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
         </div>
 
         {voiceProcessing && (
-          <p className="text-[10px] text-[#1a73e8]">Translating voice with Gemini…</p>
+          <p className="text-[10px] text-[#1a73e8]">Translating with Gemini…</p>
+        )}
+        {voiceMeta && !voiceProcessing && (
+          <p className="text-[10px] text-[#0d9488]">
+            Voice classified · ready to submit (no second Gemini wait)
+          </p>
         )}
 
         <select
@@ -184,7 +216,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
           className="w-full rounded-lg border border-[#dde3ea] bg-[#f9fafb] px-3 py-1.5 text-xs text-[#1a1f2e] placeholder:text-[#7b8fa1] focus:border-[#1a73e8] focus:outline-none"
         />
 
-        <label className="block rounded-lg border border-dashed border-[#dde3ea] bg-[#f9fafb] px-3 py-1.5 cursor-pointer hover:border-[#1a73e8]">
+        <label className="block cursor-pointer rounded-lg border border-dashed border-[#dde3ea] bg-[#f9fafb] px-3 py-1.5 hover:border-[#1a73e8]">
           <span className="flex items-center gap-2 text-[11px] text-[#7b8fa1]">
             <UploadCloud size={12} />
             {photo ? <span className="text-[#1a73e8]">{photo.name}</span> : "Attach photo"}
@@ -195,14 +227,18 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
       </div>
 
       <div className="mt-2 flex items-center justify-end gap-2">
-        {submitting && <span className="text-[10px] text-[#7b8fa1]">Submitting…</span>}
+        {submitting && (
+          <button type="button" onClick={cancelSubmit} className="flex items-center gap-1 text-[10px] text-[#e0524a]">
+            <X size={10} /> Cancel
+          </button>
+        )}
         <button
           onClick={submitIncident}
           disabled={!canSubmit}
           className="inline-flex items-center gap-1 rounded-full bg-[#1a73e8] px-3.5 py-1.5 text-xs font-medium text-white disabled:opacity-50"
         >
           {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
-          Submit
+          {submitting ? "Submitting…" : "Submit"}
         </button>
       </div>
 
@@ -210,7 +246,7 @@ export default function ReportPanel({ onReportSubmitted, session, sessionToken }
       {lastResult && (
         <div className="mt-2 rounded-lg border border-[rgba(26,115,232,0.2)] bg-[rgba(26,115,232,0.06)] px-3 py-2">
           <p className="flex items-center gap-1.5 text-xs font-medium text-[#1a73e8]">
-            <CheckCircle2 size={12} /> Report submitted — check map for your zone
+            <CheckCircle2 size={12} /> Report submitted — watch the map zone light up
           </p>
         </div>
       )}

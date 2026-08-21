@@ -22,16 +22,80 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_BACKEND_ROOT / ".env")
 
 # Primary model can be overridden via GEMINI_MODEL.
-# Keep a fallback list with active, fast Gemini models.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
+# Prefer models that actually serve for current API keys.
+# Many "gemini-2.5-*" IDs list but return 404; flash-lite-latest is reliable + fast.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
 MODEL_CANDIDATES = [
     MODEL,
-    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
     "gemini-3.5-flash-lite",
-    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
     "gemini-flash-latest",
 ]
-_DISCOVERED_MODELS: list[str] = []
+_WORKING_MODEL: str | None = None
+
+
+def _get_client() -> Optional[genai.Client]:
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    if key:
+        key = key.strip().strip('"').strip("'")
+    if not key:
+        return None
+    return genai.Client(api_key=key)
+
+
+def _parse_json(text: str) -> dict:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.split("```")[1].replace("json", "", 1).strip()
+    return json.loads(cleaned)
+
+
+def _generate_with_fallback(client: genai.Client, contents) -> str:
+    """Call Gemini with a short candidate list; cache the first working model."""
+    global _WORKING_MODEL
+    last_error = None
+
+    try:
+        from google.genai import types
+        config = types.GenerateContentConfig(
+            temperature=0.2,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+        )
+    except Exception:
+        config = None
+
+    candidates = []
+    if _WORKING_MODEL:
+        candidates.append(_WORKING_MODEL)
+    candidates.extend(MODEL_CANDIDATES)
+    # de-dupe while preserving order
+    seen = set()
+    ordered = []
+    for m in candidates:
+        if m and m not in seen:
+            seen.add(m)
+            ordered.append(m)
+
+    for model_name in ordered[:3]:
+        try:
+            kwargs = {"model": model_name, "contents": contents}
+            if config is not None:
+                kwargs["config"] = config
+            response = client.models.generate_content(**kwargs)
+            text = (response.text or "").strip()
+            if not text:
+                continue
+            _WORKING_MODEL = model_name
+            return text
+        except Exception as e:
+            last_error = e
+            continue
+    if last_error:
+        raise last_error
+    raise RuntimeError("Gemini generation failed with no candidate models attempted")
+
 
 PHOTO_PROMPT = """You are an air-quality field analyst reviewing a citizen-submitted photo.
 Analyze the visible environmental conditions.
@@ -116,59 +180,6 @@ Be specific — name the likely cause, the affected area, and concrete actions.
 Do NOT hedge or be vague.
 
 Incident data: {data}"""
-
-
-def _get_client() -> Optional[genai.Client]:
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if key:
-        key = key.strip().strip('"').strip("'")
-    if not key:
-        return None
-    return genai.Client(api_key=key)
-
-
-def _parse_json(text: str) -> dict:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1].replace("json", "", 1).strip()
-    return json.loads(cleaned)
-
-
-def _candidate_models(client: genai.Client) -> list[str]:
-    if _DISCOVERED_MODELS:
-        return list(dict.fromkeys(MODEL_CANDIDATES + _DISCOVERED_MODELS))
-
-    discovered: list[str] = []
-    try:
-        for model in client.models.list():
-            name = getattr(model, "name", "") or ""
-            short_name = name.split("/", 1)[-1] if name.startswith("models/") else name
-            if "gemini" not in short_name:
-                continue
-            if "flash" in short_name or "pro" in short_name:
-                discovered.append(short_name)
-            if len(discovered) >= 8:
-                break
-    except Exception:
-        discovered = []
-
-    _DISCOVERED_MODELS.extend(discovered)
-    return list(dict.fromkeys(MODEL_CANDIDATES + discovered))
-
-
-def _generate_with_fallback(client: genai.Client, contents) -> str:
-    """Try a small ordered set of models so transient deprecations don't break runtime."""
-    last_error = None
-    for model_name in _candidate_models(client):
-        try:
-            response = client.models.generate_content(model=model_name, contents=contents)
-            return response.text or ""
-        except Exception as e:
-            last_error = e
-            continue
-    if last_error:
-        raise last_error
-    raise RuntimeError("Gemini generation failed with no candidate models attempted")
 
 
 def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
@@ -275,25 +286,50 @@ Data: {json.dumps(cell_summary)}"""
 
 def _mock_incident_explanation(cell_data: dict, fallback_reason: str = "missing_api_key") -> dict:
     severity = cell_data.get("severity", "unverified")
-    confidence = cell_data.get("confidence_score", 0)
+    confidence = float(cell_data.get("confidence_score", 0) or 0)
+    reports = int(cell_data.get("citizen_report_count", 0) or 0)
+    sensor = cell_data.get("sensor_pm25")
+    cell = str(cell_data.get("h3_cell", "unknown"))[:12]
+
     if fallback_reason == "missing_api_key":
-        note = "Gemini API key missing - using template explanation."
+        note = "Gemini API key missing — using fused evidence summary."
+    elif fallback_reason in ("fast_mode",):
+        note = "Instant fused summary — live Gemini still loading."
     else:
-        note = f"Gemini temporarily unavailable - using template explanation ({fallback_reason})."
+        note = f"Live Gemini unavailable ({fallback_reason}) — fused evidence summary."
+
+    title_map = {
+        "confirmed": f"Sensor-confirmed pollution — {cell}",
+        "hidden": f"Blind-spot hotspot — {cell}",
+        "corroborated": f"Multi-signal haze event — {cell}",
+        "unverified": f"Early pollution signal — {cell}",
+    }
+    signals = []
+    if sensor is not None:
+        signals.append(f"Ground sensor PM2.5: {sensor} µg/m³")
+    if reports:
+        signals.append(f"Citizen reports in zone: {reports}")
+    sat = cell_data.get("satellite_anomaly_score") or (cell_data.get("evidence_breakdown") or {}).get("satellite_anomaly", {}).get("signal_strength")
+    if sat:
+        signals.append(f"Satellite aerosol signal present")
+    if severity == "hidden":
+        signals.append("No official monitoring station covers this cell")
+    if not signals:
+        signals = ["Fused confidence from available evidence streams"]
+
+    summary = cell_data.get("explanation") or (
+        f"A {severity} hotspot was detected with {confidence:.0%} confidence. "
+        + (f"{reports} citizen report(s) support this zone. " if reports else "")
+        + ("OpenAQ sensor readings corroborate elevated PM2.5. " if sensor else "This may be a sensor-blind zone. ")
+        + "Recommend field verification and a localized advisory if confidence stays high."
+    )
+
     return {
-        "incident_title": f"Pollution Event — H3 {cell_data.get('h3_cell', 'unknown')[:12]}",
-        "severity_assessment": "HIGH" if confidence > 0.7 else "MODERATE",
-        "summary": (
-            "Multi-signal evidence indicates a localized pollution event. "
-            f"Hotspot confidence is {confidence:.0%}. "
-            "Further monitoring and investigation recommended."
-        ),
-        "evidence_signals": [
-            f"Satellite anomaly score: {cell_data.get('satellite_anomaly_score', 'N/A')}",
-            f"Citizen reports in zone: {cell_data.get('citizen_report_count', 0)}",
-            f"Sensor PM2.5: {cell_data.get('sensor_pm25', 'No sensor')} µg/m³",
-        ],
-        "likely_cause": "Under investigation",
+        "incident_title": title_map.get(severity, f"Pollution event — {cell}"),
+        "severity_assessment": "HIGH" if confidence > 0.7 or severity in ("confirmed", "hidden") else "MODERATE",
+        "summary": summary,
+        "evidence_signals": signals,
+        "likely_cause": "Industrial / combustion smoke (pending field confirmation)",
         "confidence_note": note,
     }
 

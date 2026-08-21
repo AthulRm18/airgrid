@@ -71,26 +71,26 @@ export default function StatusToast({ toasts, onDismiss, onActionClick, role }) 
 export const SEVERITY_TOAST = {
   hidden: {
     severity: "hidden",
-    title: "🟣 Blind-Spot Hotspot Verified!",
-    message: "Citizen reports + Satellite anomaly confirmed in a zone with 0 official ground sensors.",
+    title: "Blind-spot hotspot found",
+    message: "Citizen reports + satellite anomaly in a zone with no official ground sensors.",
     color: "#a870e8",
   },
   confirmed: {
     severity: "confirmed",
-    title: "🔴 Severe Hotspot Confirmed!",
-    message: "Ground sensors (OpenAQ) + citizen reports agree on hazardous air quality levels.",
+    title: "Hotspot confirmed",
+    message: "OpenAQ sensors and citizen reports agree — hazardous air quality in this zone.",
     color: "#e0524a",
   },
   corroborated: {
     severity: "corroborated",
-    title: "🟠 Signal Corroborated",
-    message: "Satellite pass and multiple citizen reports now agree on this zone.",
+    title: "Signal corroborated",
+    message: "Satellite and multiple citizen reports now agree on this zone.",
     color: "#e8a23d",
   },
   unverified: {
     severity: "unverified",
-    title: "📍 Citizen Report Logged",
-    message: "Analyzing report with Gemini and cross-referencing satellite telemetry.",
+    title: "Citizen report logged",
+    message: "Pinned to the map. Watching for sensor and satellite corroboration.",
     color: "#1a73e8",
   },
 };

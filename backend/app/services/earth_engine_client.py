@@ -1,22 +1,18 @@
 """
-Earth Engine integration — pulls real Sentinel-5P aerosol/NO2 satellite
-data for an H3 cell, replacing the deterministic mock currently used in
-main.py's _mock_satellite_score().
+Earth Engine — Sentinel-5P aerosol for H3 cells.
 
-Needs:
-  - EE_SERVICE_ACCOUNT   (from your GCP service account JSON)
-  - EE_PRIVATE_KEY_PATH  (path to that JSON key file)
-  - GCP_PROJECT_ID       (your Earth Engine-enabled Cloud project)
-all set in backend/.env — see README for the registration walkthrough.
+Setup (your GCP project already has Earth Engine API enabled):
+  1. Create a service account in the GCP project (e.g. cognitive-late)
+  2. Grant it "Earth Engine Resource Viewer" (and register EE access for the SA)
+  3. Download the JSON key to backend/ee-service-account.json
+  4. In backend/.env set:
 
-This module can't be exercised in this sandbox (no live credentials, no
-network egress to earthengine.googleapis.com from here) — it's written
-against the documented ee.ServiceAccountCredentials + ee.Initialize
-pattern and Sentinel-5P's real band names, but test it for real the
-moment your EE access is approved: run
-    python -m app.services.earth_engine_client
-from backend/ once your .env is filled in — it does a single test query
-and prints the result.
+     USE_EARTH_ENGINE=true
+     GCP_PROJECT_ID=cognitive-late
+     EE_SERVICE_ACCOUNT=your-sa@cognitive-late.iam.gserviceaccount.com
+     EE_PRIVATE_KEY_PATH=./ee-service-account.json
+
+Or set GOOGLE_APPLICATION_CREDENTIALS to the key path and GCP_PROJECT_ID.
 """
 import os
 from datetime import datetime, timedelta
@@ -26,55 +22,77 @@ import ee
 from app.services.h3_utils import cell_to_latlng
 
 _initialized = False
+_init_error: str | None = None
 
 
 def _ensure_initialized():
-    """Lazy init — don't touch Earth Engine's auth flow at import time,
-    only when a caller actually needs a real query. Keeps the rest of the
-    app importable/testable even with no EE credentials configured."""
-    global _initialized
+    global _initialized, _init_error
     if _initialized:
         return
+    if _init_error:
+        raise RuntimeError(_init_error)
 
+    project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
     service_account = os.environ.get("EE_SERVICE_ACCOUNT")
-    key_path = os.environ.get("EE_PRIVATE_KEY_PATH", "./ee-service-account.json")
-    project_id = os.environ.get("GCP_PROJECT_ID")
+    key_path = (
+        os.environ.get("EE_PRIVATE_KEY_PATH")
+        or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        or "./ee-service-account.json"
+    )
 
-    if not service_account or not project_id:
-        raise RuntimeError(
-            "EE_SERVICE_ACCOUNT / GCP_PROJECT_ID not set in .env — "
-            "Earth Engine isn't configured yet. See README registration steps."
-        )
-    if not os.path.exists(key_path):
-        raise RuntimeError(f"EE key file not found at {key_path} — did you download it?")
+    try:
+        if service_account and os.path.exists(key_path):
+            credentials = ee.ServiceAccountCredentials(service_account, key_path)
+            ee.Initialize(credentials, project=project_id)
+        elif os.path.exists(key_path) and project_id:
+            # Service-account JSON via Application Default Credentials path
+            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", key_path)
+            ee.Initialize(project=project_id)
+        elif project_id:
+            ee.Initialize(project=project_id)
+        else:
+            raise RuntimeError(
+                "Set GCP_PROJECT_ID and EE_PRIVATE_KEY_PATH (service account JSON). "
+                "See earth_engine_client.py docstring."
+            )
+        _initialized = True
+        print(f"[Earth Engine] Initialized (project={project_id})")
+    except Exception as exc:
+        _init_error = str(exc)
+        raise RuntimeError(_init_error) from exc
 
-    credentials = ee.ServiceAccountCredentials(service_account, key_path)
-    ee.Initialize(credentials, project=project_id)
-    _initialized = True
+
+def is_configured() -> bool:
+    try:
+        _ensure_initialized()
+        return True
+    except Exception as exc:
+        print(f"[Earth Engine] Not ready: {exc}")
+        return False
+
+
+def status() -> dict:
+    """Return EE readiness for /api/data-sources."""
+    try:
+        _ensure_initialized()
+        return {"ok": True, "detail": "initialized"}
+    except Exception as exc:
+        msg = str(exc)
+        hint = None
+        if "serviceUsageConsumer" in msg or "permission" in msg.lower():
+            hint = (
+                "Grant the service account roles/serviceusage.serviceUsageConsumer "
+                "on project cognitive-late (IAM → ee-runner → Add role)."
+            )
+        return {"ok": False, "detail": msg[:200], "hint": hint}
 
 
 def get_aerosol_index(h3_cell: str, days_lookback: int = 3) -> float | None:
-    """
-    Returns a 0-1 normalized aerosol/pollution index for the area around
-    an H3 cell, using Sentinel-5P's UV Aerosol Index band (a good general
-    smoke/dust/haze indicator — positive values indicate absorbing
-    aerosols like smoke or dust).
-
-    Averages over the last `days_lookback` days since Sentinel-5P revisit
-    isn't daily-guaranteed for every location (cloud cover, orbit gaps) —
-    a single-day query can come back empty.
-
-    Returns None if no cloud-free pass covered this cell in the window
-    (be honest about this in the UI — an absent satellite reading is a
-    real "we don't know yet", not a zero).
-    """
+    """0-1 normalized Sentinel-5P UV Aerosol Index for the cell area."""
     _ensure_initialized()
 
     lat, lng = cell_to_latlng(h3_cell)
     point = ee.Geometry.Point([lng, lat])
-    # ~2km buffer around the cell center — roughly matches an H3 res-7
-    # hexagon's footprint, coarser than Sentinel-5P's native ~7km pixel
-    # anyway so this just controls how we sample within that pixel.
     region = point.buffer(2000)
 
     end = datetime.utcnow()
@@ -99,22 +117,11 @@ def get_aerosol_index(h3_cell: str, days_lookback: int = 3) -> float | None:
     if raw_value is None:
         return None
 
-    # Aerosol index typically ranges roughly -1 (clean) to 3+ (heavy
-    # smoke/dust) in practice over polluted regions — clamp and normalize
-    # to 0-1 so it combines cleanly with the other fusion signals.
     normalized = max(0.0, min(raw_value / 3.0, 1.0))
     return round(normalized, 3)
 
 
 def get_no2_column(h3_cell: str, days_lookback: int = 3) -> float | None:
-    """
-    Tropospheric NO2 column density (mol/m^2) — a strong proxy for
-    vehicular/industrial combustion specifically, complements the aerosol
-    index (which catches dust/smoke more broadly). Useful for the
-    photo-classification's "likely_source" field: high NO2 + low aerosol
-    suggests vehicular; high aerosol + moderate NO2 suggests
-    burning/dust.
-    """
     _ensure_initialized()
 
     lat, lng = cell_to_latlng(h3_cell)
@@ -140,12 +147,10 @@ def get_no2_column(h3_cell: str, days_lookback: int = 3) -> float | None:
 
 
 if __name__ == "__main__":
-    # Quick manual test — run from backend/: python -m app.services.earth_engine_client
-    # once your .env has EE_SERVICE_ACCOUNT / EE_PRIVATE_KEY_PATH / GCP_PROJECT_ID set.
     from dotenv import load_dotenv
     load_dotenv()
 
-    test_cell = "873da1149ffffff"  # Anand Vihar, Delhi — matches the mock station set
+    test_cell = "873da1149ffffff"
     print(f"Testing Earth Engine against cell {test_cell}...")
     try:
         aerosol = get_aerosol_index(test_cell)

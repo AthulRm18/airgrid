@@ -234,7 +234,7 @@ function App() {
   function handleReportSubmitted(result) {
     const optimistic = {
       id: result?.id || result?.incident_id || `opt-${Date.now()}`,
-      text: result?.text || "",
+      text: result?.text || result?.location_hint || "New report",
       source: result?.source || "text",
       submitted_at: result?.submitted_at || new Date().toISOString(),
       location_hint: result?.location_hint,
@@ -247,15 +247,20 @@ function App() {
     setReportsBump((b) => b + 1);
     const meta = SEVERITY_TOAST.unverified;
     const id = ++toastId.current;
-    setToasts((t) => [...t.slice(-2), { id, ...meta }]);
+    setToasts((t) => [...t.slice(-2), { id, ...meta, h3_cell: result?.h3_cell }]);
     if (result?.h3_cell) {
       setFlashCells((f) => [...new Set([...f, result.h3_cell])]);
       setSelectedCell(result.h3_cell);
       setTimeout(() => setFlashCells((f) => f.filter((c) => c !== result.h3_cell)), 6000);
     }
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 7000);
+    // Refresh feed + map immediately, then again after fusion settles
     refreshHotspots();
-    setTimeout(() => setPendingReport(null), 8000);
+    setTimeout(() => {
+      setReportsBump((b) => b + 1);
+      refreshHotspots();
+      setPendingReport(null);
+    }, 2500);
   }
 
   if (authChecking) {
@@ -276,35 +281,20 @@ function App() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#f0f4f9] text-[#16202c]">
-      <header className="flex shrink-0 items-center justify-between border-b border-[#dde3ea] bg-white px-4 py-2">
+      <header className="flex shrink-0 items-center justify-between border-b border-[#dde3ea] bg-white px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           <VigilLogo size={28} />
           <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-bold text-[#1a1f2e]">VIGIL</span>
-              <span className="rounded bg-[#f0f4f9] px-1.5 py-0.5 text-[9px] font-semibold text-[#5f6f86]">
-                Autonomous Air Intelligence
+            <span className="text-sm font-bold text-[#1a1f2e]">VIGIL</span>
+            <span className="ml-2 text-[11px] text-[#7b8fa1]">India node · BRICS</span>
+            {dataSources && (
+              <span className="ml-1 text-[9px] text-[#7b8fa1]">
+                · {dataSources.openaq === "configured" ? "OpenAQ live" : "OpenAQ demo"}
+                · {dataSources.gemini === "configured" ? "Gemini live" : "Gemini demo"}
+                · {dataSources.earth_engine === "enabled" ? "EE live" : "EE off"}
               </span>
-            </div>
-            <div className="flex items-center gap-1 text-[10px] text-[#7b8fa1]">
-              <span>Delhi-NCR Node</span>
-              <span>·</span>
-              <span className="text-[#1a73e8] font-medium">Gemini 3.6 Live</span>
-              <span>·</span>
-              <span>Sentinel-5P Satellite</span>
-            </div>
+            )}
           </div>
-        </div>
-
-        {/* Workflow overview — makes the entire problem/solution immediately obvious to anyone */}
-        <div className="hidden lg:flex items-center gap-1.5 rounded-full border border-[#dde3ea] bg-[#f8fafd] px-3 py-1 text-[10px] text-[#5f6f86]">
-          <span className="font-semibold text-[#1a73e8]">1. DETECT</span>
-          <span className="text-[#b7c3d4]">→</span>
-          <span className="font-semibold text-[#a870e8]">2. FUSE</span>
-          <span className="text-[#b7c3d4]">→</span>
-          <span className="font-semibold text-[#e8a23d]">3. PREDICT</span>
-          <span className="text-[#b7c3d4]">→</span>
-          <span className="font-semibold text-[#e0524a]">4. ACT</span>
         </div>
 
         <SummaryCards backendOk={backendOk} refreshToken={refreshToken} inline />

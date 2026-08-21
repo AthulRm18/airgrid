@@ -217,37 +217,46 @@ def classify_cell(
     # --- Derive severity tier from evidence signals ---
     has_citizen_signal = any(r.get("haze_score", 0) >= 0.5 for r in citizen_reports)
     has_satellite_signal = (satellite_anomaly_score or 0) >= 0.5
+    strong_citizen_consensus = len(citizen_reports) >= 3 and has_citizen_signal
     nearby_sensor_cells = neighbors(h3_cell, k=1) & sensor_coverage
 
     if sensor_pm25 is not None and sensor_pm25 >= PM25_UNHEALTHY:
         cell.severity = Severity.CONFIRMED
-        cell.aqi_estimate = sensor_pm25
+        cell.aqi_estimate = round(sensor_pm25, 1)
         cell.explanation = (
             f"Ground sensor confirms PM2.5 at {sensor_pm25:.0f} µg/m³ "
             f"(unhealthy threshold: {PM25_UNHEALTHY})."
         )
-    elif has_citizen_signal and has_satellite_signal and not nearby_sensor_cells:
+    elif (has_satellite_signal or strong_citizen_consensus) and has_citizen_signal and not nearby_sensor_cells:
         cell.severity = Severity.HIDDEN
-        cell.aqi_estimate = satellite_anomaly_score * 250
-        cell.explanation = (
-            "No official sensor within range of this cell. Citizen photo "
-            "reports and satellite aerosol imagery independently agree on "
-            "a pollution event here — this would be invisible to standard "
-            "monitoring infrastructure."
-        )
-    elif has_citizen_signal and has_satellite_signal and nearby_sensor_cells:
+        sat_val = satellite_anomaly_score or 0.5
+        avg_haze = sum(r.get("haze_score", 0.6) for r in citizen_reports) / max(len(citizen_reports), 1)
+        cell.aqi_estimate = round(max(sat_val * 250, avg_haze * 230), 1)
+        if has_satellite_signal:
+            cell.explanation = (
+                "No official sensor within range of this cell. Citizen reports "
+                "and satellite aerosol imagery independently agree on a pollution "
+                "event here — this would be invisible to standard monitoring infrastructure."
+            )
+        else:
+            cell.explanation = (
+                f"No official sensor within range. Multiple corroborating citizen reports ({len(citizen_reports)}) "
+                "confirm an active localized pollution event in this unmonitored zone."
+            )
+    elif (has_satellite_signal or strong_citizen_consensus) and has_citizen_signal and nearby_sensor_cells:
         cell.severity = Severity.CORROBORATED
-        cell.aqi_estimate = sensor_pm25 or (satellite_anomaly_score * 250)
+        sat_val = satellite_anomaly_score or 0.5
+        avg_haze = sum(r.get("haze_score", 0.6) for r in citizen_reports) / max(len(citizen_reports), 1)
+        cell.aqi_estimate = round(sensor_pm25 or max(sat_val * 250, avg_haze * 220), 1)
         cell.explanation = (
-            "Citizen reports and satellite aerosol data agree, corroborated "
-            "by a nearby ground sensor."
+            f"Corroborated by {len(citizen_reports)} citizen reports and regional sensor data in adjacent zones."
         )
-    elif has_citizen_signal or confidence >= 0.4:
+    elif has_citizen_signal or confidence >= 0.35:
         cell.severity = Severity.UNVERIFIED
         if has_citizen_signal:
             cell.explanation = (
-                "Citizen report received, awaiting satellite pass or sensor "
-                "corroboration before escalating."
+                f"Citizen report received ({len(citizen_reports)}), awaiting additional reports "
+                "or satellite pass before escalating."
             )
         else:
             cell.explanation = "Elevated multi-signal score, under observation."
