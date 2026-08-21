@@ -1,23 +1,23 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap");
 @import "tailwindcss";
 
 @theme {
   /* --- VIGIL design tokens ---
-     Palette evokes dusk-under-haze: a deep slate-blue base rather than
-     pure black, so the severity colors (which DO follow AQI convention —
-     officers need instant recognition, this isn't a place to be clever)
-     have room to read clearly against it.
+    Shift the product away from the previous dark-ops dashboard and toward
+    a lighter, calmer surface language. Severity colors remain distinct, but
+    the base UI should feel more like a civic product than a control room.
   */
-  --color-ink-950: #0d1117;
-  --color-ink-900: #131a24;
-  --color-ink-800: #1b2432;
-  --color-ink-700: #263043;
-  --color-ink-600: #3a475e;
-  --color-mist-400: #7c8aa0;
-  --color-mist-200: #b8c2d1;
-  --color-mist-50: #eef2f7;
+  --color-ink-950: #f5f7fb;
+  --color-ink-900: #ffffff;
+  --color-ink-800: #f8fafd;
+  --color-ink-700: #d8e0eb;
+  --color-ink-600: #b7c3d4;
+  --color-mist-400: #5f6f86;
+  --color-mist-200: #314154;
+  --color-mist-50: #16202c;
 
-  --color-clear-500: #4fb8ac;   /* clean-air accent — brand, not severity */
-  --color-clear-400: #6fd1c5;
+  --color-clear-500: #1a73e8;
+  --color-clear-400: #4c8df6;
 
   /* severity scale — kept close to global AQI convention on purpose */
   --color-sev-confirmed: #e0524a;    /* red   — sensor-confirmed */
@@ -39,22 +39,31 @@
   --color-impact-moderate: #e8a23d;
   --color-impact-low: #4fb8ac;
 
-  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
-  --font-body: "Inter", system-ui, sans-serif;
+  --font-display: "Manrope", "Segoe UI", sans-serif;
+  --font-body: "Manrope", "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Menlo, monospace;
+}
+
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--color-ink-950);
   color: var(--color-mist-50);
   font-family: var(--font-body);
+  min-height: 100vh;
+  background-image:
+    radial-gradient(circle at top left, rgba(26, 115, 232, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(79, 184, 172, 0.08), transparent 18%),
+    linear-gradient(180deg, #f8fbff 0%, #f4f7fb 100%);
 }
 
-/* subtle atmospheric texture behind the map */
 .haze-backdrop {
   background:
-    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(79,184,172,0.10), transparent),
-    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(168,112,232,0.06), transparent);
+    radial-gradient(ellipse 80% 50% at 20% -10%, rgba(26, 115, 232, 0.12), transparent),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(79, 184, 172, 0.08), transparent),
+    linear-gradient(180deg, rgba(255,255,255,0.98), rgba(244,247,251,0.96));
 }
 
 @keyframes pulse-ring {
@@ -94,23 +103,24 @@ body {
   .hex-pulse, .animate-fade-in, .animate-slide-in, .animate-count { animation: none; }
 }
 
-/* Leaflet overrides for dark theme */
 .leaflet-container {
-  background: var(--color-ink-900) !important;
+  background: #edf3fb !important;
+  font-family: var(--font-body) !important;
 }
 .leaflet-tile-pane {
-  filter: brightness(0.7) contrast(1.15) saturate(0.3);
+  filter: saturate(0.9) contrast(1.02) brightness(1.02);
 }
 .leaflet-control-zoom a {
-  background: var(--color-ink-800) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
   color: var(--color-mist-200) !important;
-  border-color: var(--color-ink-600) !important;
+  border-color: var(--color-ink-700) !important;
+  box-shadow: 0 10px 24px rgba(60, 64, 67, 0.12) !important;
 }
 .leaflet-control-zoom a:hover {
-  background: var(--color-ink-700) !important;
+  background: #f4f8fe !important;
 }
 .leaflet-control-attribution {
-  background: rgba(13, 17, 23, 0.8) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
   color: var(--color-mist-400) !important;
   font-size: 10px !important;
 }
@@ -125,6 +135,6 @@ body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--color-ink-900); }
-::-webkit-scrollbar-thumb { background: var(--color-ink-600); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-ink-700); }
+::-webkit-scrollbar-track { background: rgba(216, 224, 235, 0.35); }
+::-webkit-scrollbar-thumb { background: rgba(95, 111, 134, 0.32); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(95, 111, 134, 0.48); }

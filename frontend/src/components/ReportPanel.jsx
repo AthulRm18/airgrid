@@ -1,273 +1,195 @@
-import { useState, useRef } from "react";
-import {
-  Send, Image as ImageIcon, Loader2, Mic, MicOff,
-  WifiOff, CheckCircle2, Globe
-} from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Loader2, Mic, MicOff, Send, UploadCloud, MapPin } from "lucide-react";
 
-// Same bbox as the map — random point within it for the "use my location"
-// stand-in, since the demo runs on desktop without real geolocation.
-const BBOX = { minLng: 76.8, minLat: 28.4, maxLng: 77.6, maxLat: 28.9 };
+const LOCATIONS = [
+  { label: "Anand Vihar, Delhi", lat: 28.6469, lng: 77.3157 },
+  { label: "Rohini, Delhi", lat: 28.7041, lng: 77.1025 },
+  { label: "Noida Sector 62", lat: 28.628, lng: 77.364 },
+  { label: "Ghaziabad Industrial", lat: 28.669, lng: 77.453 },
+  { label: "Connaught Place", lat: 28.6315, lng: 77.2167 },
+];
 
-function randomPointInBbox() {
-  return {
-    lat: BBOX.minLat + Math.random() * (BBOX.maxLat - BBOX.minLat),
-    lng: BBOX.minLng + Math.random() * (BBOX.maxLng - BBOX.minLng),
-  };
-}
-
-export default function ReportPanel({ onReportSubmitted }) {
+export default function ReportPanel({ onReportSubmitted, session, sessionToken }) {
   const [text, setText] = useState("");
+  const [locationHint, setLocationHint] = useState("");
   const [photo, setPhoto] = useState(null);
+  const [locationIdx, setLocationIdx] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [lastResult, setLastResult] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [offlineQueue, setOfflineQueue] = useState([]);
-  const [simulateOffline, setSimulateOffline] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  const [lastResult, setLastResult] = useState(null);
+  const [recording, setRecording] = useState(false);
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const recognitionRef = useRef(null);
 
-  async function submitText() {
-    if (!text.trim()) return;
+  const coords = LOCATIONS[locationIdx];
+  const canSubmit = useMemo(() => Boolean(text.trim() || photo), [text, photo]);
 
-    if (simulateOffline) {
-      setOfflineQueue((q) => [...q, { type: "text", text: text.trim(), status: "QUEUED OFFLINE" }]);
-      setText("");
+  function startVoice() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Voice input requires Chrome.");
       return;
     }
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = false;
+    recognitionRef.current = rec;
+    rec.onstart = () => setRecording(true);
+    rec.onend = () => setRecording(false);
+    rec.onresult = async (event) => {
+      const transcript = event.results[0][0].transcript;
+      setVoiceProcessing(true);
+      try {
+        const res = await fetch("/api/voice-transcript", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transcript }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setText(data.translated || transcript);
+          if (data.extracted_location_hint && !locationHint) {
+            setLocationHint(data.extracted_location_hint);
+          }
+        } else {
+          setText(transcript);
+        }
+      } catch {
+        setText(transcript);
+      } finally {
+        setVoiceProcessing(false);
+      }
+    };
+    rec.onerror = () => setRecording(false);
+    rec.start();
+  }
 
+  function stopVoice() {
+    recognitionRef.current?.stop();
+    setRecording(false);
+  }
+
+  async function submitIncident() {
+    if (!canSubmit) return;
     setSubmitting(true);
     setSubmitError("");
     setLastResult(null);
-    const { lat, lng } = randomPointInBbox();
+
+    const form = new FormData();
+    form.append("lat", String(coords.lat));
+    form.append("lng", String(coords.lng));
+    form.append("text", text.trim());
+    form.append("location_hint", locationHint.trim() || coords.label);
+    form.append("country_code", session?.country_code || "IN");
+    if (photo) form.append("file", photo);
+
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
-      const res = await fetch("/api/citizen-report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lat, lng, text: text.trim(), source: "text" }),
-        signal: controller.signal,
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const headers = sessionToken ? { "X-Session-Token": sessionToken } : undefined;
+      const res = await fetch("/api/incidents/report", {
+        method: "POST", body: form, headers, signal: controller.signal,
       });
       clearTimeout(timeoutId);
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Report submit failed (${res.status}): ${errText}`);
-      }
+      if (!res.ok) throw new Error(`Submit failed (${res.status})`);
       const data = await res.json();
       setLastResult(data);
       setText("");
-      onReportSubmitted();
-    } catch (err) {
-      setSubmitError(err?.message || "Could not submit report. Please retry.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function submitPhoto() {
-    if (!photo) return;
-    setSubmitting(true);
-    setSubmitError("");
-    setLastResult(null);
-    const { lat, lng } = randomPointInBbox();
-    const form = new FormData();
-    form.append("lat", lat);
-    form.append("lng", lng);
-    form.append("file", photo);
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
-      const res = await fetch("/api/citizen-report/photo", { method: "POST", body: form, signal: controller.signal });
-      clearTimeout(timeoutId);
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Photo submit failed (${res.status}): ${errText}`);
-      }
-      const data = await res.json();
-      setLastResult(data);
+      setLocationHint("");
       setPhoto(null);
       onReportSubmitted();
     } catch (err) {
-      setSubmitError(err?.message || "Could not submit photo report. Please retry.");
+      setSubmitError(err?.message || "Could not submit. Please retry.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function startRecording() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        // For the demo, convert voice to text via a prompt
-        // In production, this would use a speech-to-text API
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        setText((prev) => prev || "[Voice recording captured — submit to process]");
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setIsRecording(true);
-    } catch {
-      alert("Microphone access denied. Please allow microphone access to record voice reports.");
-    }
-  }
-
-  function stopRecording() {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }
-
-  function syncOfflineQueue() {
-    setOfflineQueue((q) => q.map((item) => ({ ...item, status: "SYNCED ✓" })));
-    setTimeout(() => setOfflineQueue([]), 2000);
-    onReportSubmitted();
-  }
-
   return (
-    <div className="rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] p-5">
-      <div className="flex items-center justify-between mb-1">
-        <h2 className="font-[family-name:var(--font-display)] text-lg text-[var(--color-mist-50)]">
-          Report air quality
-        </h2>
-        {/* Offline toggle for demo */}
-        <button
-          onClick={() => {
-            const next = !simulateOffline;
-            setSimulateOffline(next);
-            if (!next && offlineQueue.length > 0) syncOfflineQueue();
-          }}
-          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full transition-colors ${
-            simulateOffline
-              ? "bg-[rgba(224,82,74,0.15)] text-[var(--color-sev-confirmed)]"
-              : "text-[var(--color-mist-400)] hover:text-[var(--color-mist-200)]"
-          }`}
+    <div className="bg-white px-4 py-3">
+      <h2 className="text-sm font-semibold text-[#1a1f2e] mb-2">Report incident</h2>
+
+      <div className="space-y-2">
+        <div className="relative">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Describe smoke, haze, or smell…"
+            rows={2}
+            className="w-full rounded-lg border border-[#dde3ea] px-3 py-2 pr-10 text-sm text-[#1a1f2e] placeholder:text-[#7b8fa1] focus:border-[#1a73e8] focus:outline-none resize-none"
+          />
+          <button
+            type="button"
+            onClick={recording ? stopVoice : startVoice}
+            disabled={voiceProcessing}
+            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#f0f4f9] disabled:opacity-40"
+            title={recording ? "Stop" : "Voice"}
+          >
+            {voiceProcessing ? (
+              <Loader2 size={12} className="animate-spin text-[#1a73e8]" />
+            ) : recording ? (
+              <MicOff size={12} className="text-[#e0524a]" />
+            ) : (
+              <Mic size={12} className="text-[#1a73e8]" />
+            )}
+          </button>
+        </div>
+
+        <select
+          value={locationIdx}
+          onChange={(e) => setLocationIdx(Number(e.target.value))}
+          className="w-full rounded-lg border border-[#dde3ea] bg-[#f9fafb] px-3 py-2 text-sm text-[#1a1f2e] focus:border-[#1a73e8] focus:outline-none"
         >
-          {simulateOffline ? <WifiOff size={10} /> : null}
-          {simulateOffline ? "Offline mode" : "Simulate offline"}
-        </button>
+          {LOCATIONS.map((loc, i) => (
+            <option key={loc.label} value={i}>{loc.label}</option>
+          ))}
+        </select>
+
+        <div className="flex items-center gap-1.5 text-[10px] text-[#7b8fa1]">
+          <MapPin size={10} className="text-[#1a73e8]" />
+          <span>{coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}</span>
+        </div>
+
+        <input
+          value={locationHint}
+          onChange={(e) => setLocationHint(e.target.value)}
+          placeholder="Landmark detail (optional)"
+          className="w-full rounded-lg border border-[#dde3ea] bg-[#f9fafb] px-3 py-1.5 text-xs text-[#1a1f2e] placeholder:text-[#7b8fa1] focus:border-[#1a73e8] focus:outline-none"
+        />
+
+        <label className="block rounded-lg border border-dashed border-[#dde3ea] bg-[#f9fafb] px-3 py-1.5 cursor-pointer hover:border-[#1a73e8]">
+          <span className="flex items-center gap-2 text-[11px] text-[#7b8fa1]">
+            <UploadCloud size={12} />
+            {photo ? <span className="text-[#1a73e8]">{photo.name}</span> : "Attach photo"}
+          </span>
+          <input type="file" accept="image/*" className="hidden"
+            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />
+        </label>
       </div>
-      <p className="text-xs text-[var(--color-mist-400)] mb-4">
-        Citizen input — text, voice, or photo. Any language.
-      </p>
 
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="e.g. bahut dhundh hai, saans lene mein takleef ho rahi hai"
-        rows={2}
-        className="w-full rounded-lg bg-[var(--color-ink-800)] border border-[var(--color-ink-600)] px-3 py-2 text-sm text-[var(--color-mist-50)] placeholder:text-[var(--color-mist-400)] focus:outline-none focus:border-[var(--color-clear-500)] resize-none"
-      />
-
-      <div className="flex items-center gap-2 mt-3">
+      <div className="mt-2 flex items-center justify-end">
         <button
-          onClick={submitText}
-          disabled={submitting || !text.trim()}
-          className="flex items-center gap-1.5 rounded-lg bg-[var(--color-clear-500)] px-3 py-1.5 text-sm font-medium text-[var(--color-ink-950)] disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--color-clear-400)] transition-colors"
+          onClick={submitIncident}
+          disabled={submitting || !canSubmit}
+          className="inline-flex items-center gap-1 rounded-full bg-[#1a73e8] px-3.5 py-1.5 text-xs font-medium text-white disabled:opacity-50"
         >
-          {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+          {submitting ? <Loader2 size={11} className="animate-spin" /> : <Send size={11} />}
           Submit
         </button>
-
-        {/* Voice recording */}
-        <button
-          onClick={isRecording ? stopRecording : startRecording}
-          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-            isRecording
-              ? "border-[var(--color-sev-confirmed)] text-[var(--color-sev-confirmed)] bg-[rgba(224,82,74,0.1)]"
-              : "border-[var(--color-ink-600)] text-[var(--color-mist-200)] hover:border-[var(--color-clear-500)]"
-          }`}
-        >
-          {isRecording ? <MicOff size={14} /> : <Mic size={14} />}
-          {isRecording ? "Stop" : "Voice"}
-        </button>
-
-        <label className="flex items-center gap-1.5 rounded-lg border border-[var(--color-ink-600)] px-3 py-1.5 text-sm text-[var(--color-mist-200)] cursor-pointer hover:border-[var(--color-clear-500)] transition-colors">
-          <ImageIcon size={14} />
-          {photo ? photo.name.slice(0, 16) : "Photo"}
-          <input
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-          />
-        </label>
-
-        {photo && (
-          <button
-            onClick={submitPhoto}
-            disabled={submitting}
-            className="text-sm text-[var(--color-clear-400)] hover:underline disabled:opacity-40"
-          >
-            Send photo
-          </button>
-        )}
       </div>
 
-      {/* Offline queue */}
-      {offlineQueue.length > 0 && (
-        <div className="mt-3 space-y-1">
-          {offlineQueue.map((item, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs rounded-lg bg-[var(--color-ink-800)] px-3 py-1.5">
-              {item.status === "QUEUED OFFLINE" ? (
-                <WifiOff size={12} className="text-[var(--color-sev-corroborated)]" />
-              ) : (
-                <CheckCircle2 size={12} className="text-[var(--color-clear-400)]" />
-              )}
-              <span className="text-[var(--color-mist-200)] truncate flex-1">{item.text}</span>
-              <span className={`font-[family-name:var(--font-mono)] text-[10px] ${
-                item.status === "SYNCED ✓" ? "text-[var(--color-clear-400)]" : "text-[var(--color-sev-corroborated)]"
-              }`}>
-                {item.status}
-              </span>
-            </div>
-          ))}
+      {submitError && <p className="mt-2 text-xs text-[#e0524a]">{submitError}</p>}
+      {lastResult && (
+        <div className="mt-2 rounded-lg border border-[rgba(26,115,232,0.2)] bg-[rgba(26,115,232,0.06)] px-3 py-2">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-[#1a73e8]">
+            <CheckCircle2 size={12} /> Report submitted
+          </p>
+          <p className="mt-0.5 text-[10px] text-[#5f6f86]">
+            Zone {lastResult.h3_cell?.slice(0, 10)}…
+            {lastResult.combined_haze_score != null && ` · ${Math.round(lastResult.combined_haze_score * 100)}% haze`}
+          </p>
         </div>
       )}
-
-      {submitError && (
-        <p className="mt-3 text-xs text-[var(--color-sev-confirmed)]">{submitError}</p>
-      )}
-
-      {lastResult && <ResultPreview result={lastResult} />}
-    </div>
-  );
-}
-
-function ResultPreview({ result }) {
-  const classification = result.gemini_classification;
-  return (
-    <div className="mt-4 rounded-lg bg-[var(--color-ink-800)] px-3 py-2.5 text-xs space-y-1.5 animate-fade-in">
-      <p className="text-[var(--color-clear-400)] font-medium flex items-center gap-1.5">
-        <CheckCircle2 size={12} /> Gemini classification
-      </p>
-      {classification?.translated_text && (
-        <p className="text-[var(--color-mist-200)]">
-          "{classification.translated_text}"{" "}
-          <span className="text-[var(--color-mist-400)] inline-flex items-center gap-1">
-            <Globe size={10} /> {classification.detected_language}
-          </span>
-        </p>
-      )}
-      {classification?.event_type && (
-        <p className="text-[var(--color-mist-400)]">
-          Event: <span className="text-[var(--color-mist-200)]">{classification.event_type}</span>
-          {classification.severity && <> · Severity: <span className="text-[var(--color-mist-200)]">{classification.severity}</span></>}
-          {classification.possible_source && <> · Source: <span className="text-[var(--color-mist-200)]">{classification.possible_source}</span></>}
-        </p>
-      )}
-      {classification?.notes && (
-        <p className="text-[var(--color-mist-200)]">{classification.notes}</p>
-      )}
-      <p className="text-[var(--color-mist-400)] font-[family-name:var(--font-mono)]">
-        cell {result.h3_cell} · haze {(result.haze_score ?? 0).toFixed(2)}
-        {classification?.confidence != null && ` · confidence ${classification.confidence.toFixed(2)}`}
-      </p>
     </div>
   );
 }

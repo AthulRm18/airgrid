@@ -1,127 +1,92 @@
 import { useEffect, useState } from "react";
-import {
-  Activity, Eye, AlertTriangle, Users, Bell
-} from "lucide-react";
+import { Activity, Eye, Bell, Users, AlertTriangle } from "lucide-react";
 
-export default function SummaryCards({ backendOk }) {
+const CARDS = [
+  { key: "active_hotspots", label: "Incidents", icon: Activity, color: "var(--color-sev-confirmed)" },
+  { key: "hidden_hotspots", label: "Blind spots", icon: Eye, color: "var(--color-sev-hidden)" },
+  { key: "high_confidence_cells", label: "High conf.", icon: AlertTriangle, color: "var(--color-sev-corroborated)" },
+  { key: "population_at_risk", label: "At risk", icon: Users, color: "var(--color-prop-near)", fmt: (v) => v != null ? (v > 999 ? `${Math.round(v / 1000)}k` : v) : "—" },
+  { key: "citizen_reports", label: "Reports", icon: Bell, color: "var(--color-clear-500)" },
+];
+
+export default function SummaryCards({ backendOk, refreshToken, inline }) {
   const [data, setData] = useState(null);
-  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const res = await fetch("/api/summary");
-        if (res.ok) {
-          setData(await res.json());
-          setLoadError(false);
-        } else {
-          setLoadError(true);
-        }
-      } catch {
-        setLoadError(true);
-      }
-    };
+    const load = () =>
+      fetch("/api/summary")
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d) setData(d); })
+        .catch(() => {});
     load();
-    const id = setInterval(load, 10000);
+    const id = setInterval(load, 6000);
     return () => clearInterval(id);
-  }, []);
+  }, [refreshToken]);
 
-  if (loadError || backendOk === false) {
+  // ── Inline header mode: compact pill strip ──
+  if (inline) {
+    if (!data) {
+      return (
+        <div className="flex items-center gap-3">
+          {CARDS.map((c) => (
+            <div key={c.key} className="h-4 w-16 animate-pulse rounded bg-[#dde3ea]" />
+          ))}
+        </div>
+      );
+    }
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="rounded-xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] px-4 py-3 opacity-40">
-            <p className="text-xs text-[var(--color-mist-400)]">—</p>
-            <p className="text-2xl text-[var(--color-mist-400)]">—</p>
+      <div className="flex items-center gap-3">
+        {CARDS.map((c) => {
+          const raw = data[c.key];
+          const display = c.fmt ? c.fmt(raw) : raw;
+          return (
+            <div key={c.key} className="flex items-center gap-1.5">
+              <c.icon size={12} style={{ color: c.color }} />
+              <span className="font-[family-name:var(--font-display)] text-sm font-semibold" style={{ color: c.color }}>
+                {display}
+              </span>
+              <span className="text-[11px] text-[#7b8fa1]">{c.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── Standalone card grid (not used in new layout but kept for fallback) ──
+  if (!data || backendOk === false) {
+    return (
+      <div className="grid grid-cols-5 gap-2">
+        {CARDS.map((c) => (
+          <div key={c.key} className="rounded-xl border border-[#dde3ea] bg-white px-3 py-3 animate-pulse">
+            <div className="h-3 w-12 rounded bg-[#dde3ea] mb-2" />
+            <div className="h-6 w-8 rounded bg-[#dde3ea]" />
           </div>
         ))}
       </div>
     );
   }
-
-  if (!data) {
-    return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div key={i} className="rounded-xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] px-4 py-3 animate-pulse">
-            <div className="h-3 w-20 bg-[var(--color-ink-700)] rounded mb-2" />
-            <div className="h-7 w-10 bg-[var(--color-ink-700)] rounded" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  const cards = [
-    {
-      label: "Active Hotspots",
-      value: data.active_hotspots,
-      icon: Activity,
-      color: "var(--color-sev-confirmed)",
-      bgColor: "rgba(224, 82, 74, 0.12)",
-    },
-    {
-      label: "Hidden Hotspots",
-      value: data.hidden_hotspots,
-      icon: Eye,
-      color: "var(--color-sev-hidden)",
-      bgColor: "rgba(168, 112, 232, 0.12)",
-      subtitle: "No official sensor coverage",
-    },
-    {
-      label: "Predicted Spikes",
-      value: data.high_confidence_cells,
-      icon: AlertTriangle,
-      color: "var(--color-sev-corroborated)",
-      bgColor: "rgba(232, 162, 61, 0.12)",
-    },
-    {
-      label: "Population at Risk",
-      value: data.population_at_risk?.toLocaleString() ?? "—",
-      icon: Users,
-      color: "var(--color-prop-near)",
-      bgColor: "rgba(232, 125, 58, 0.12)",
-    },
-    {
-      label: "Pending Alerts",
-      value: data.pending_alerts,
-      icon: Bell,
-      color: data.pending_alerts > 0 ? "var(--color-sev-confirmed)" : "var(--color-clear-400)",
-      bgColor: data.pending_alerts > 0 ? "rgba(224, 82, 74, 0.12)" : "rgba(79, 184, 172, 0.12)",
-    },
-  ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-      {cards.map((card) => (
-        <div
-          key={card.label}
-          className="rounded-xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] px-4 py-3 animate-fade-in"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <div
-              className="rounded-lg p-1.5"
-              style={{ backgroundColor: card.bgColor }}
-            >
-              <card.icon size={14} style={{ color: card.color }} />
+    <div className="grid grid-cols-5 gap-2">
+      {CARDS.map((c) => {
+        const raw = data[c.key];
+        const display = c.fmt ? c.fmt(raw) : raw;
+        return (
+          <div key={c.key} className="rounded-xl border border-[#dde3ea] bg-white px-3 py-3">
+            <div className="flex items-center gap-1.5 mb-1">
+              <c.icon size={12} style={{ color: c.color }} />
+              <span className="text-[11px] text-[#7b8fa1]">{c.label}</span>
             </div>
-            <span className="text-xs text-[var(--color-mist-400)] leading-tight">
-              {card.label}
-            </span>
-          </div>
-          <p
-            className="font-[family-name:var(--font-display)] text-2xl font-semibold animate-count"
-            style={{ color: card.color }}
-          >
-            {card.value}
-          </p>
-          {card.subtitle && (
-            <p className="text-[10px] text-[var(--color-mist-400)] mt-0.5">
-              {card.subtitle}
+            <p
+              className="font-[family-name:var(--font-display)] text-2xl font-semibold"
+              style={{ color: c.color }}
+            >
+              {display}
             </p>
-          )}
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

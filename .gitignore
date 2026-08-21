@@ -29,6 +29,7 @@ build/
 *.pkl
 *.h5
 backend/data/*.csv
+backend/data/demo_state.json
 
 .env
 backend/.env

@@ -56,15 +56,14 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
   }, [propagation]);
 
   return (
-    <div className="relative rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-900)] haze-backdrop overflow-hidden">
-      <div className="flex items-center justify-between px-5 pt-5 pb-3">
-        <h2 className="font-[family-name:var(--font-display)] text-lg text-[var(--color-mist-50)]">
-          Pollution intelligence grid
-        </h2>
+    <div className="relative flex h-full flex-col overflow-hidden">
+      {/* Thin legend strip */}
+      <div className="flex shrink-0 items-center justify-between border-b border-[#dde3ea] bg-white px-4 py-2">
+        <span className="text-[11px] font-medium text-[#314154]">Pollution grid</span>
         <Legend />
       </div>
 
-      <div className="h-[480px]">
+      <div className="flex-1">
         <MapContainer
           center={MAP_CENTER}
           zoom={MAP_ZOOM}
@@ -183,8 +182,8 @@ export default function HotspotMap({ hotspots, selectedCell, onSelectCell, onOpe
 
       {(hotspots.length === 0 && sensors.length === 0) && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <p className="text-[var(--color-mist-400)] text-sm bg-[var(--color-ink-900)]/80 px-4 py-2 rounded-lg">
-            Loading pollution data… or click <strong>Seed demo</strong> if the backend just started.
+          <p className="rounded-lg bg-white/90 px-3 py-1.5 text-xs text-[#7b8fa1] shadow-sm">
+            Loading… or click Seed demo if the backend just started.
           </p>
         </div>
       )}
@@ -231,19 +230,16 @@ function FitBounds({ hotspots }) {
 
 function Legend() {
   return (
-    <div className="flex flex-wrap gap-3 text-xs text-[var(--color-mist-400)]">
+    <div className="flex flex-wrap gap-3 text-[11px] text-[#7b8fa1]">
       {Object.entries(SEVERITY).map(([key, s]) => (
         <span key={key} className="flex items-center gap-1.5">
-          <span
-            className="inline-block w-2.5 h-2.5 rounded-full"
-            style={{ backgroundColor: s.rawColor }}
-          />
+          <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: s.rawColor }} />
           {s.label}
         </span>
       ))}
       <span className="flex items-center gap-1.5">
-        <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: "#e87d3a" }} />
-        Predicted spread
+        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: "#e87d3a" }} />
+        Spread
       </span>
     </div>
   );

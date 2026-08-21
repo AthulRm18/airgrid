@@ -1,281 +1,295 @@
+/**
+ * EvidencePanel — "Why this alert?" side drawer.
+ *
+ * Strategy: show all non-AI data INSTANTLY from the hotspot data
+ * already in memory. Then fetch full evidence (with Gemini) in the
+ * background and fill in the AI sections when ready.
+ *
+ * This eliminates the full-screen spinner the user sees today.
+ */
 import { useState, useEffect } from "react";
 import {
-  X, Loader2, CheckCircle2, Shield, TrendingUp, Users, MapPin,
-  Wind, AlertTriangle, MessageSquare, School, Hospital
+  X, Loader2, CheckCircle2, Shield, TrendingUp, Users,
+  Wind, AlertTriangle, Clock, MapPin,
 } from "lucide-react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, ReferenceLine,
+} from "recharts";
 
-const EVIDENCE_FETCH_TIMEOUT_MS = 50000;
+const EVIDENCE_TIMEOUT = 45000;
 
-async function fetchEvidenceWithRetry(h3Cell, attempts = 1) {
-  let lastError = null;
-  for (let i = 0; i < attempts; i += 1) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), EVIDENCE_FETCH_TIMEOUT_MS);
-    try {
-      const res = await fetch(`/api/hotspots/${h3Cell}/evidence`, { signal: controller.signal });
-      if (!res.ok) {
-        throw new Error(`status ${res.status}`);
-      }
-      return await res.json();
-    } catch (err) {
-      lastError = err;
-      if (i < attempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-  throw lastError || new Error("Failed to load evidence");
-}
+export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
+  const [full, setFull] = useState(null);       // full Gemini-enriched payload
+  const [aiLoading, setAiLoading] = useState(true);
+  const [aiError, setAiError] = useState(false);
 
-export default function EvidencePanel({ h3Cell, onClose }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-
+  // Fetch full evidence asynchronously — show baseline from `hotspot` prop immediately
   useEffect(() => {
     if (!h3Cell) return;
     let cancelled = false;
-    setLoading(true);
-    fetchEvidenceWithRetry(h3Cell)
-      .then((payload) => {
-        if (!cancelled) setData(payload);
-      })
-      .catch(() => {
-        if (!cancelled) setData(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    setFull(null);
+    setAiLoading(true);
+    setAiError(false);
 
-    return () => {
-      cancelled = true;
-    };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), EVIDENCE_TIMEOUT);
+
+    fetch(`/api/hotspots/${h3Cell}/evidence`, { signal: controller.signal })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((data) => { if (!cancelled) setFull(data); })
+      .catch(() => { if (!cancelled) setAiError(true); })
+      .finally(() => { clearTimeout(timeout); if (!cancelled) setAiLoading(false); });
+
+    return () => { cancelled = true; clearTimeout(timeout); };
   }, [h3Cell]);
 
   if (!h3Cell) return null;
+
+  // Use full data if available, otherwise fall back to hotspot prop
+  const data = full ?? hotspot;
+  const confidence = Math.round((data?.confidence_score ?? 0) * 100);
+  const sev = data?.severity ?? "unknown";
+  const sevColor = {
+    confirmed: "var(--color-sev-confirmed)",
+    hidden: "var(--color-sev-hidden)",
+    corroborated: "var(--color-sev-corroborated)",
+    unverified: "var(--color-mist-400)",
+  }[sev] ?? "var(--color-mist-400)";
 
   return (
     <div className="fixed inset-0 z-[1000] flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-lg bg-[var(--color-ink-900)] border-l border-[var(--color-ink-700)] overflow-y-auto animate-slide-in"
+        className="relative flex h-full w-full max-w-[480px] flex-col bg-[var(--color-ink-900)] border-l border-[var(--color-ink-700)] overflow-hidden animate-slide-in"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="sticky top-0 z-10 bg-[var(--color-ink-900)]/95 backdrop-blur border-b border-[var(--color-ink-700)] px-6 py-4 flex items-center justify-between">
+        {/* Sticky header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-ink-700)] px-5 py-4">
           <div>
-            <h2 className="font-[family-name:var(--font-display)] text-lg text-[var(--color-mist-50)]">
-              Why this alert?
+            <h2 className="font-[family-name:var(--font-display)] text-base font-semibold text-[var(--color-mist-50)]">
+              Evidence — {sev.charAt(0).toUpperCase() + sev.slice(1)}
             </h2>
-            <p className="font-[family-name:var(--font-mono)] text-xs text-[var(--color-mist-400)] mt-0.5">
+            <p className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--color-mist-400)]">
               {h3Cell}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="rounded-lg p-1.5 hover:bg-[var(--color-ink-700)] transition-colors"
+            className="rounded-lg p-1.5 text-[var(--color-mist-400)] hover:text-[var(--color-mist-50)] transition-colors"
           >
-            <X size={18} className="text-[var(--color-mist-400)]" />
+            <X size={18} />
           </button>
         </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center h-64">
-            <Loader2 size={24} className="animate-spin text-[var(--color-clear-400)]" />
-            <span className="ml-2 text-[var(--color-mist-400)]">Loading evidence…</span>
-          </div>
-        ) : !data ? (
-          <div className="px-6 py-12 text-center text-[var(--color-mist-400)]">
-            Could not load evidence for this cell.
-          </div>
-        ) : (
-          <div className="px-6 py-5 space-y-5">
-            {/* Confidence Score Gauge */}
-            <ConfidenceGauge score={data.confidence_score} severity={data.severity} />
-
-            {/* Evidence Checklist */}
-            <EvidenceChecklist items={data.evidence_checklist} />
-
-            {/* Evidence Breakdown */}
-            <EvidenceBreakdown breakdown={data.evidence_breakdown} />
-
-            {/* Impact */}
-            {data.impact && <ImpactSection impact={data.impact} corridorImpact={data.corridor_impact} />}
-
-            {/* Weather */}
-            {data.weather && <WeatherSection weather={data.weather} />}
-
-            {/* Forecast */}
-            {data.forecast && <ForecastSection forecast={data.forecast} spikeInfo={data.spike_info} />}
-
-            {/* Incident Explanation */}
-            {data.incident_explanation && <IncidentExplanation explanation={data.incident_explanation} />}
-
-            {/* Recommendation */}
-            {data.recommendation && <RecommendationSection rec={data.recommendation} />}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-function ConfidenceGauge({ score, severity }) {
-  const pct = Math.round((score || 0) * 100);
-  const circumference = 2 * Math.PI * 40;
-  const offset = circumference - (pct / 100) * circumference;
-  const color = pct >= 80 ? "var(--color-sev-confirmed)" :
-                pct >= 60 ? "var(--color-sev-corroborated)" :
-                pct >= 40 ? "var(--color-sev-hidden)" : "var(--color-sev-unverified)";
-
-  return (
-    <div className="flex items-center gap-5 rounded-xl bg-[var(--color-ink-800)] p-5">
-      <svg width="96" height="96" viewBox="0 0 96 96">
-        <circle cx="48" cy="48" r="40" fill="none" stroke="var(--color-ink-600)" strokeWidth="6" />
-        <circle
-          cx="48" cy="48" r="40" fill="none"
-          stroke={color} strokeWidth="6"
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="confidence-ring"
-          transform="rotate(-90 48 48)"
-        />
-        <text x="48" y="44" textAnchor="middle" fill={color} fontSize="22" fontWeight="700" fontFamily="var(--font-display)">
-          {pct}%
-        </text>
-        <text x="48" y="60" textAnchor="middle" fill="var(--color-mist-400)" fontSize="9">
-          confidence
-        </text>
-      </svg>
-      <div>
-        <p className="font-[family-name:var(--font-display)] text-lg text-[var(--color-mist-50)]">
-          Hotspot Confidence
-        </p>
-        <p className="text-xs text-[var(--color-mist-400)] mt-1">
-          Evidence-fusion weighted score combining satellite, citizen reports,
-          sensor data, weather, and historical baseline.
-        </p>
-        <p className="text-[10px] text-[var(--color-mist-400)] mt-1 italic">
-          Not a calibrated probability — a transparent scoring model.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-
-function EvidenceChecklist({ items }) {
-  if (!items || items.length === 0) return null;
-  return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--color-mist-50)] mb-3">
-        <Shield size={14} className="text-[var(--color-clear-400)]" />
-        Evidence signals
-      </h3>
-      <ul className="space-y-2">
-        {items.map((item, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm">
-            {item.active ? (
-              <CheckCircle2 size={16} className="text-[var(--color-clear-400)] shrink-0 mt-0.5" />
-            ) : (
-              <div className="w-4 h-4 rounded-full border border-[var(--color-ink-600)] shrink-0 mt-0.5" />
-            )}
-            <span className={item.active ? "text-[var(--color-mist-200)]" : "text-[var(--color-mist-400)]"}>
-              {item.check}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-
-function EvidenceBreakdown({ breakdown }) {
-  if (!breakdown) return null;
-  const entries = Object.entries(breakdown).sort((a, b) => b[1].contribution - a[1].contribution);
-  const maxContrib = Math.max(...entries.map(([, v]) => v.contribution), 0.01);
-
-  return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="text-sm font-medium text-[var(--color-mist-50)] mb-3">
-        Evidence contribution breakdown
-      </h3>
-      <div className="space-y-2">
-        {entries.map(([key, val]) => (
-          <div key={key}>
-            <div className="flex justify-between text-xs text-[var(--color-mist-400)] mb-1">
-              <span>{key.replace(/_/g, " ")}</span>
-              <span className="font-[family-name:var(--font-mono)]">
-                +{(val.contribution * 100).toFixed(1)}%
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {/* Confidence + severity — instant from hotspot prop */}
+          <div className="flex items-center gap-4 rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-800)] px-4 py-4">
+            <div className="relative h-16 w-16 shrink-0">
+              <svg viewBox="0 0 60 60" className="h-full w-full -rotate-90">
+                <circle cx="30" cy="30" r="26" fill="none" stroke="var(--color-ink-600)" strokeWidth="5" />
+                <circle
+                  cx="30" cy="30" r="26" fill="none"
+                  stroke={sevColor} strokeWidth="5"
+                  strokeDasharray={`${2 * Math.PI * 26}`}
+                  strokeDashoffset={`${2 * Math.PI * 26 * (1 - confidence / 100)}`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span
+                className="absolute inset-0 flex items-center justify-center font-[family-name:var(--font-display)] text-base font-bold"
+                style={{ color: sevColor }}
+              >
+                {confidence}%
               </span>
             </div>
-            <div className="h-1.5 rounded-full bg-[var(--color-ink-600)]">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${(val.contribution / maxContrib) * 100}%`,
-                  backgroundColor: "var(--color-clear-400)",
-                }}
-              />
+            <div>
+              <p className="text-sm font-semibold text-[var(--color-mist-50)]">
+                {confidence >= 80 ? "High confidence" : confidence >= 60 ? "Moderate confidence" : "Early signal"}
+              </p>
+              <p className="mt-0.5 text-xs text-[var(--color-mist-400)]">
+                Fused from satellite · sensors · citizen reports · weather
+              </p>
+              {data?.citizen_report_count > 0 && (
+                <p className="mt-1.5 text-xs" style={{ color: sevColor }}>
+                  {data.citizen_report_count} citizen report{data.citizen_report_count > 1 ? "s" : ""} in zone
+                </p>
+              )}
             </div>
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
+          {/* Evidence signals checklist — instant */}
+          {(data?.evidence_checklist || data?.evidence_breakdown) && (
+            <Section title="Evidence signals" icon={Shield}>
+              {data.evidence_checklist?.map((item, i) => (
+                <div key={i} className="flex items-start gap-2 py-1">
+                  {item.active
+                    ? <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--color-clear-500)]" />
+                    : <div className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded-full border border-[var(--color-ink-600)]" />
+                  }
+                  <span className={`text-sm ${item.active ? "text-[var(--color-mist-200)]" : "text-[var(--color-mist-400)]"}`}>
+                    {item.check}
+                  </span>
+                </div>
+              ))}
+              {!data?.evidence_checklist && data?.evidence_breakdown && (
+                <BreakdownBars breakdown={data.evidence_breakdown} />
+              )}
+            </Section>
+          )}
 
-function ImpactSection({ impact, corridorImpact }) {
-  return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--color-mist-50)] mb-3">
-        <Users size={14} className="text-[var(--color-prop-near)]" />
-        Impact assessment
-      </h3>
-      <div className="grid grid-cols-3 gap-3 mb-3">
-        <StatCard label="Population" value={impact.population?.toLocaleString()} icon={Users} color="var(--color-prop-near)" />
-        <StatCard label="Schools" value={impact.schools} icon={School} color="var(--color-sev-corroborated)" />
-        <StatCard label="Hospitals" value={impact.hospitals} icon={Hospital} color="var(--color-sev-confirmed)" />
-      </div>
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-[var(--color-mist-400)]">Impact score</span>
-        <span
-          className="font-medium px-2 py-0.5 rounded-full text-[10px]"
-          style={{
-            color: impact.priority === "CRITICAL" ? "var(--color-sev-confirmed)" : "var(--color-sev-corroborated)",
-            backgroundColor: impact.priority === "CRITICAL" ? "rgba(224,82,74,0.15)" : "rgba(232,162,61,0.15)",
-          }}
-        >
-          {impact.priority}
-        </span>
-      </div>
-      {corridorImpact && (
-        <div className="mt-3 pt-3 border-t border-[var(--color-ink-600)]">
-          <p className="text-xs text-[var(--color-mist-400)] mb-1">Predicted exposure corridor</p>
-          <div className="flex gap-4 text-xs text-[var(--color-mist-200)]">
-            <span>{corridorImpact.total_population_at_risk?.toLocaleString()} people</span>
-            <span>{corridorImpact.total_schools} schools</span>
-            <span>{corridorImpact.total_hospitals} hospitals</span>
+          {/* Impact — instant from full data */}
+          {full?.impact && (
+            <Section title="People at risk" icon={Users}>
+              <div className="grid grid-cols-3 gap-2">
+                <Stat label="Population" value={full.impact.population?.toLocaleString()} color="var(--color-prop-near)" />
+                <Stat label="Schools" value={full.impact.schools} color="var(--color-sev-corroborated)" />
+                <Stat label="Hospitals" value={full.impact.hospitals} color="var(--color-sev-confirmed)" />
+              </div>
+              {full.impact.priority && (
+                <p className="mt-2 text-xs text-[var(--color-mist-400)]">
+                  Priority: <span
+                    className="font-medium"
+                    style={{ color: full.impact.priority === "CRITICAL" ? "var(--color-sev-confirmed)" : "var(--color-sev-corroborated)" }}
+                  >{full.impact.priority}</span>
+                </p>
+              )}
+            </Section>
+          )}
+
+          {/* Weather — from full data */}
+          {full?.weather && (
+            <Section title="Weather" icon={Wind}>
+              <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                <Stat label="Wind" value={`${full.weather.wind_speed_kmh} km/h`} small />
+                <Stat label="Direction" value={`${full.weather.wind_direction_deg}°`} small />
+                <Stat label="Temp" value={`${full.weather.temperature_c}°C`} small />
+                <Stat label="Humidity" value={`${full.weather.humidity_pct}%`} small />
+              </div>
+            </Section>
+          )}
+
+          {/* Forecast chart — from full data */}
+          {full?.forecast?.length > 0 && (
+            <Section title="12-hour forecast" icon={TrendingUp}>
+              {full.spike_info && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs"
+                  style={{ background: "rgba(224,82,74,0.1)" }}>
+                  <AlertTriangle size={13} className="shrink-0 text-[var(--color-sev-confirmed)]" />
+                  <span className="text-[var(--color-mist-200)]">
+                    Spike to <strong className="text-[var(--color-sev-confirmed)]">{full.spike_info.predicted_value} µg/m³</strong> predicted in {full.spike_info.hours_until}h
+                  </span>
+                </div>
+              )}
+              <ForecastChart forecast={full.forecast} />
+            </Section>
+          )}
+
+          {/* AI analysis — loads async */}
+          <div className="rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-800)] px-4 py-4">
+            <div className="flex items-center gap-2 mb-3">
+              <MapPin size={14} className="text-[var(--color-clear-500)]" />
+              <span className="text-sm font-medium text-[var(--color-mist-50)]">Gemini analysis</span>
+              {aiLoading && (
+                <span className="flex items-center gap-1.5 text-xs text-[var(--color-mist-400)]">
+                  <Loader2 size={11} className="animate-spin" /> Generating...
+                </span>
+              )}
+            </div>
+
+            {aiError ? (
+              <p className="text-xs text-[var(--color-mist-400)]">
+                AI analysis unavailable — check Gemini API key in backend .env
+              </p>
+            ) : full?.incident_explanation ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-[var(--color-mist-50)]">
+                  {full.incident_explanation.incident_title}
+                </p>
+                <p className="text-sm leading-6 text-[var(--color-mist-200)]">
+                  {full.incident_explanation.summary}
+                </p>
+                {full.incident_explanation.evidence_signals?.length > 0 && (
+                  <ul className="mt-1 space-y-1">
+                    {full.incident_explanation.evidence_signals.map((s, i) => (
+                      <li key={i} className="flex items-start gap-1.5 text-xs text-[var(--color-mist-400)]">
+                        <span className="text-[var(--color-clear-500)]">—</span> {s}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : aiLoading ? (
+              <div className="space-y-2">
+                <div className="h-3 rounded bg-[var(--color-ink-700)] animate-pulse w-3/4" />
+                <div className="h-3 rounded bg-[var(--color-ink-700)] animate-pulse w-full" />
+                <div className="h-3 rounded bg-[var(--color-ink-700)] animate-pulse w-5/6" />
+              </div>
+            ) : null}
           </div>
+
+          {/* Recommendation — from full data */}
+          {full?.recommendation && (
+            <Section title="Recommended response" icon={Clock}>
+              {full.recommendation.urgency && (
+                <span
+                  className="inline-block mb-2 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                  style={{
+                    color: full.recommendation.urgency === "IMMEDIATE" ? "var(--color-sev-confirmed)" : "var(--color-sev-corroborated)",
+                    background: full.recommendation.urgency === "IMMEDIATE" ? "rgba(224,82,74,0.12)" : "rgba(232,162,61,0.12)",
+                  }}
+                >
+                  {full.recommendation.urgency}
+                </span>
+              )}
+              {full.recommendation.actions?.map((a, i) => (
+                <div key={i} className="py-1.5">
+                  <p className="text-sm text-[var(--color-mist-200)]">
+                    <span className="font-medium text-[var(--color-clear-500)] mr-1">{i + 1}.</span>
+                    {a.action}
+                  </p>
+                  {a.rationale && (
+                    <p className="mt-0.5 ml-4 text-[11px] text-[var(--color-mist-400)]">{a.rationale}</p>
+                  )}
+                </div>
+              ))}
+              {full.recommendation.advisory_text && (
+                <div className="mt-3 rounded-xl bg-[var(--color-ink-900)] px-3 py-2 text-xs">
+                  <p className="text-[var(--color-mist-400)] mb-1">Draft advisory:</p>
+                  <p className="text-[var(--color-mist-200)] italic">"{full.recommendation.advisory_text}"</p>
+                </div>
+              )}
+            </Section>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
 
-function StatCard({ label, value, icon: Icon, color }) {
+function Section({ title, icon: Icon, children }) {
   return (
-    <div className="rounded-lg bg-[var(--color-ink-900)] p-2.5 text-center">
-      <Icon size={14} style={{ color }} className="mx-auto mb-1" />
-      <p className="font-[family-name:var(--font-display)] text-lg font-semibold text-[var(--color-mist-50)]">
-        {value}
+    <div className="rounded-2xl border border-[var(--color-ink-700)] bg-[var(--color-ink-800)] px-4 py-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Icon size={14} className="text-[var(--color-clear-500)]" />
+        <span className="text-sm font-medium text-[var(--color-mist-50)]">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+
+function Stat({ label, value, color, small }) {
+  return (
+    <div className={`rounded-xl bg-[var(--color-ink-900)] px-2 py-2 text-center ${small ? "" : ""}`}>
+      <p
+        className={`font-[family-name:var(--font-display)] font-semibold ${small ? "text-sm" : "text-xl"} text-[var(--color-mist-50)]`}
+        style={color ? { color } : {}}
+      >
+        {value ?? "—"}
       </p>
       <p className="text-[10px] text-[var(--color-mist-400)]">{label}</p>
     </div>
@@ -283,170 +297,49 @@ function StatCard({ label, value, icon: Icon, color }) {
 }
 
 
-function WeatherSection({ weather }) {
-  const windArrow = weather.wind_direction_deg ?? 0;
+function BreakdownBars({ breakdown }) {
+  const entries = Object.entries(breakdown).sort((a, b) => b[1].contribution - a[1].contribution);
+  const max = Math.max(...entries.map(([, v]) => v.contribution), 0.01);
   return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--color-mist-50)] mb-3">
-        <Wind size={14} className="text-[var(--color-clear-400)]" />
-        Weather conditions
-      </h3>
-      <div className="grid grid-cols-4 gap-2 text-center text-xs">
-        <div>
-          <div className="flex items-center justify-center gap-1 mb-1">
-            <Wind size={12} style={{ transform: `rotate(${windArrow}deg)`, color: "var(--color-clear-400)" }} />
+    <div className="space-y-2">
+      {entries.map(([key, val]) => (
+        <div key={key}>
+          <div className="flex justify-between text-[11px] text-[var(--color-mist-400)] mb-0.5">
+            <span>{key.replace(/_/g, " ")}</span>
+            <span>+{(val.contribution * 100).toFixed(1)}%</span>
           </div>
-          <p className="text-[var(--color-mist-200)] font-medium">{weather.wind_speed_kmh} km/h</p>
-          <p className="text-[var(--color-mist-400)]">Wind</p>
+          <div className="h-1 rounded-full bg-[var(--color-ink-600)]">
+            <div
+              className="h-full rounded-full bg-[var(--color-clear-500)] transition-all duration-500"
+              style={{ width: `${(val.contribution / max) * 100}%` }}
+            />
+          </div>
         </div>
-        <div>
-          <p className="text-[var(--color-mist-200)] font-medium mb-1">{windArrow}°</p>
-          <p className="text-[var(--color-mist-400)]">Direction</p>
-        </div>
-        <div>
-          <p className="text-[var(--color-mist-200)] font-medium mb-1">{weather.temperature_c}°C</p>
-          <p className="text-[var(--color-mist-400)]">Temp</p>
-        </div>
-        <div>
-          <p className="text-[var(--color-mist-200)] font-medium mb-1">{weather.humidity_pct}%</p>
-          <p className="text-[var(--color-mist-400)]">Humidity</p>
-        </div>
-      </div>
-      {weather.source === "mock" && (
-        <p className="text-[10px] text-[var(--color-mist-400)] mt-2 italic">
-          Demo weather data — not live observations
-        </p>
-      )}
+      ))}
     </div>
   );
 }
 
 
-function ForecastSection({ forecast, spikeInfo }) {
-  if (!forecast || forecast.length === 0) return null;
+function ForecastChart({ forecast }) {
   const chartData = forecast.map((p) => ({
-    time: new Date(p.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    time: new Date(p.timestamp).toLocaleTimeString([], { hour: "2-digit" }),
     pm25: p.predicted_pm25,
   }));
-
   return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--color-mist-50)] mb-1">
-        <TrendingUp size={14} className="text-[var(--color-clear-400)]" />
-        12-hour forecast
-      </h3>
-      {spikeInfo && (
-        <div
-          className="rounded-lg px-3 py-2 mb-3 text-xs flex items-center gap-2"
-          style={{ backgroundColor: "rgba(224,82,74,0.12)" }}
-        >
-          <AlertTriangle size={14} className="text-[var(--color-sev-confirmed)]" />
-          <span className="text-[var(--color-mist-200)]">
-            Predicted spike to <strong className="text-[var(--color-sev-confirmed)]">{spikeInfo.predicted_value} µg/m³</strong> in{" "}
-            <strong className="text-[var(--color-sev-confirmed)]">{spikeInfo.hours_until}h</strong>
-          </span>
-        </div>
-      )}
-      <ResponsiveContainer width="100%" height={120}>
-        <LineChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
-          <XAxis
-            dataKey="time" interval="preserveStartEnd"
-            tick={{ fill: "var(--color-mist-400)", fontSize: 10 }}
-            axisLine={{ stroke: "var(--color-ink-600)" }}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fill: "var(--color-mist-400)", fontSize: 10 }}
-            axisLine={false} tickLine={false} width={36}
-          />
-          <Tooltip
-            contentStyle={{
-              background: "var(--color-ink-900)",
-              border: "1px solid var(--color-ink-600)",
-              borderRadius: 8, fontSize: 12,
-            }}
-            labelStyle={{ color: "var(--color-mist-200)" }}
-            formatter={(value) => [`${value} µg/m³`, "PM2.5"]}
-          />
-          <ReferenceLine y={120} stroke="var(--color-sev-confirmed)" strokeDasharray="4 4" strokeWidth={1} />
-          <Line
-            type="monotone" dataKey="pm25"
-            stroke="var(--color-clear-400)" strokeWidth={2} dot={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-      <p className="text-[10px] text-[var(--color-mist-400)] mt-1">
-        Red dashed line = unhealthy threshold (120 µg/m³). Forecast uncertainty increases with horizon.
-      </p>
-    </div>
-  );
-}
-
-
-function IncidentExplanation({ explanation }) {
-  return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--color-mist-50)] mb-2">
-        <MapPin size={14} className="text-[var(--color-clear-400)]" />
-        {explanation.incident_title || "Incident analysis"}
-      </h3>
-      <p className="text-sm text-[var(--color-mist-200)] mb-3">{explanation.summary}</p>
-      {explanation.evidence_signals && (
-        <ul className="space-y-1 mb-2">
-          {explanation.evidence_signals.map((s, i) => (
-            <li key={i} className="text-xs text-[var(--color-mist-400)] flex items-start gap-1.5">
-              <span className="text-[var(--color-clear-400)]">•</span> {s}
-            </li>
-          ))}
-        </ul>
-      )}
-      {explanation.confidence_note && (
-        <p className="text-[10px] text-[var(--color-mist-400)] italic">{explanation.confidence_note}</p>
-      )}
-    </div>
-  );
-}
-
-
-function RecommendationSection({ rec }) {
-  return (
-    <div className="rounded-xl bg-[var(--color-ink-800)] p-4">
-      <h3 className="flex items-center gap-2 text-sm font-medium text-[var(--color-mist-50)] mb-3">
-        <MessageSquare size={14} className="text-[var(--color-clear-400)]" />
-        Recommended response
-        {rec.urgency && (
-          <span
-            className="ml-auto text-[10px] font-medium px-2 py-0.5 rounded-full"
-            style={{
-              color: rec.urgency === "IMMEDIATE" ? "var(--color-sev-confirmed)" : "var(--color-sev-corroborated)",
-              backgroundColor: rec.urgency === "IMMEDIATE" ? "rgba(224,82,74,0.15)" : "rgba(232,162,61,0.15)",
-            }}
-          >
-            {rec.urgency}
-          </span>
-        )}
-      </h3>
-      {rec.actions && (
-        <ol className="space-y-2 mb-3">
-          {rec.actions.map((a, i) => (
-            <li key={i} className="text-sm">
-              <span className="text-[var(--color-mist-200)]">
-                <span className="text-[var(--color-clear-400)] font-medium mr-1.5">{i + 1}.</span>
-                {a.action}
-              </span>
-              {a.rationale && (
-                <p className="text-[10px] text-[var(--color-mist-400)] ml-4 mt-0.5">{a.rationale}</p>
-              )}
-            </li>
-          ))}
-        </ol>
-      )}
-      {rec.advisory_text && (
-        <div className="rounded-lg bg-[var(--color-ink-900)] p-3 text-xs">
-          <p className="text-[var(--color-mist-400)] mb-1">Draft public advisory:</p>
-          <p className="text-[var(--color-mist-200)] italic">"{rec.advisory_text}"</p>
-        </div>
-      )}
-    </div>
+    <ResponsiveContainer width="100%" height={100}>
+      <LineChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+        <XAxis dataKey="time" tick={{ fill: "var(--color-mist-400)", fontSize: 10 }}
+          axisLine={{ stroke: "var(--color-ink-600)" }} tickLine={false} interval="preserveStartEnd" />
+        <YAxis tick={{ fill: "var(--color-mist-400)", fontSize: 10 }}
+          axisLine={false} tickLine={false} width={32} />
+        <Tooltip
+          contentStyle={{ background: "var(--color-ink-900)", border: "1px solid var(--color-ink-600)", borderRadius: 8, fontSize: 11 }}
+          formatter={(v) => [`${v} µg/m³`, "PM2.5"]}
+        />
+        <ReferenceLine y={120} stroke="var(--color-sev-confirmed)" strokeDasharray="4 3" strokeWidth={1} />
+        <Line type="monotone" dataKey="pm25" stroke="var(--color-clear-500)" strokeWidth={2} dot={false} />
+      </LineChart>
+    </ResponsiveContainer>
   );
 }
