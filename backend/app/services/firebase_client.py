@@ -1,5 +1,5 @@
 """
-Firebase Firestore client for VIGIL.
+Firebase Firestore client for CONFLUX.
 
 Falls back to a local JSON file when Firebase is not configured.
 No database tables — just a single demo-state file for persistence

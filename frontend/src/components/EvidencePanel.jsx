@@ -40,14 +40,21 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
 
     // Phase 2: live Gemini enrichment (may take a few seconds)
     const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 20000);
+    const timeout = setTimeout(() => ctrl.abort(), 35000); // backend has up to 25 s; give it headroom
     fetch(`/api/hotspots/${h3Cell}/evidence`, { signal: ctrl.signal })
       .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
       .then((data) => {
         if (cancelled) return;
         setFull(data);
+        // aiLive = backend actually ran Gemini (not just the fast-mode fallback)
         const note = String(data?.incident_explanation?.confidence_note || "").toLowerCase();
-        setAiLive(!note.includes("template") && !note.includes("missing") && !note.includes("timeout"));
+        const isGeminiLive = (
+          !note.includes("fast_mode") &&
+          !note.includes("missing_api_key") &&
+          !note.includes("gemini_timeout") &&
+          !note.includes("gemini_error")
+        );
+        setAiLive(isGeminiLive);
         setAiError(false);
       })
       .catch(() => {
@@ -150,11 +157,43 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
           )}
 
           {full?.impact && (
-            <Section title="People at risk" icon={Users}>
-              <div className="grid grid-cols-3 gap-2">
-                <Stat label="Population" value={full.impact.population?.toLocaleString()} color="var(--color-prop-near)" />
-                <Stat label="Schools" value={full.impact.schools} color="var(--color-sev-corroborated)" />
-                <Stat label="Hospitals" value={full.impact.hospitals} color="var(--color-sev-confirmed)" />
+            <Section title="People & institutions at risk" icon={Users}>
+              <div className="space-y-3">
+                {/* Immediate Hotspot Cell */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5 text-[11px] text-[var(--color-mist-400)]">
+                    <span className="font-medium text-[var(--color-mist-200)]">Immediate hotspot cell</span>
+                    <span className="font-mono text-[10px]">{h3Cell ? `${h3Cell.slice(0, 11)}…` : ""}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <Stat label="Population" value={full.impact.population?.toLocaleString()} color="var(--color-prop-near)" />
+                    <Stat label="Schools" value={full.impact.schools} color="var(--color-sev-corroborated)" />
+                    <Stat label="Hospitals" value={full.impact.hospitals} color="var(--color-sev-confirmed)" />
+                  </div>
+                </div>
+
+                {/* Downwind Exposure Corridor */}
+                {full?.corridor_impact && (
+                  <div className="pt-2.5 border-t border-[var(--color-ink-700)]">
+                    <div className="flex items-center justify-between mb-1.5 text-[11px] text-[var(--color-mist-400)]">
+                      <span className="font-medium text-[var(--color-mist-200)]">
+                        Downwind plume corridor ({full.corridor_impact.cell_count || 15} cells)
+                      </span>
+                      {full.corridor_impact.corridor_priority && (
+                        <span className="text-[10px] font-semibold tracking-wide uppercase" style={{
+                          color: full.corridor_impact.corridor_priority === "CRITICAL" ? "var(--color-sev-confirmed)" : "var(--color-sev-corroborated)"
+                        }}>
+                          {full.corridor_impact.corridor_priority} PRIORITY
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Stat label="Corridor pop" value={full.corridor_impact.total_population_at_risk?.toLocaleString()} color="var(--color-prop-near)" />
+                      <Stat label="Corridor schools" value={full.corridor_impact.total_schools} color="var(--color-sev-corroborated)" />
+                      <Stat label="Corridor hospitals" value={full.corridor_impact.total_hospitals} color="var(--color-sev-confirmed)" />
+                    </div>
+                  </div>
+                )}
               </div>
             </Section>
           )}
@@ -172,7 +211,7 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
 
           {full?.forecast?.length > 0 && (
             <Section title="12-hour forecast" icon={TrendingUp}>
-              {full.spike_info && (
+              {full.spike_info && full.spike_info.hours_until > 0 && (
                 <div className="mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs" style={{ background: "rgba(224,82,74,0.1)" }}>
                   <AlertTriangle size={13} className="shrink-0 text-[var(--color-sev-confirmed)]" />
                   <span className="text-[var(--color-mist-200)]">

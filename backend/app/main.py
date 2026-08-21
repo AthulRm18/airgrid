@@ -1,5 +1,5 @@
 """
-VIGIL backend — FastAPI app.
+CONFLUX backend — FastAPI app.
 
 Run locally:
     uvicorn app.main:app --reload --port 8000
@@ -58,8 +58,8 @@ ROLE_AUTHORITY = "authority"
 ROLE_RESEARCHER = "researcher"
 ROLE_COORDINATOR = "coordinator"
 
-app = FastAPI(title="VIGIL API", version="0.2.0",
-              description="Environmental intelligence before exposure.")
+app = FastAPI(title="CONFLUX API", version="0.3.0",
+              description="Community environmental intelligence & early warning before exposure.")
 
 app.add_middleware(
     CORSMiddleware,
@@ -130,7 +130,7 @@ _DEMO_SEEDED = False
 _HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
 _EVIDENCE_CACHE: dict[str, dict] = {}
 _OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "20"))
-_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "60"))
+_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "20"))
 _GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "25"))
 
 
@@ -141,19 +141,19 @@ async def _train_forecast_on_startup():
     readings are already fetched per-request in /api/hotspots, so there is no
     need to also pull 14 days of history at startup."""
     global _HISTORICAL_DF, _DEMO_SEEDED
-    print("[VIGIL] Building training data...")
+    print("[CONFLUX] Building training data...")
     _HISTORICAL_DF = historical_data.generate_synthetic_history(days=14)
     _rebuild_baseline_cache(_HISTORICAL_DF)
     forecast.train(_HISTORICAL_DF)
-    print("[VIGIL] Forecast model ready.")
+    print("[CONFLUX] Forecast model ready.")
 
     # Prime sensor cache early so dashboard's first load can use real readings.
     try:
         seeded_readings = await openaq_client.fetch_all_readings("76.8,28.4,77.6,28.9")
         source = seeded_readings[0].get("source") if seeded_readings else "none"
-        print(f"[VIGIL] Sensor cache primed ({len(seeded_readings)} readings, source={source}).")
+        print(f"[CONFLUX] Sensor cache primed ({len(seeded_readings)} readings, source={source}).")
     except Exception as exc:
-        print(f"[VIGIL] Sensor cache prime skipped: {exc}")
+        print(f"[CONFLUX] Sensor cache prime skipped: {exc}")
 
     # Restore persisted BRICS events from previous session
     persisted = fb.get_federated_events()
@@ -165,9 +165,9 @@ async def _train_forecast_on_startup():
         try:
             result = await seed_demo()
             _DEMO_SEEDED = True
-            print(f"[VIGIL] Demo scenario seeded ({result['seeded']} citizen reports).")
+            print(f"[CONFLUX] Demo scenario seeded ({result['seeded']} citizen reports).")
         except Exception as exc:
-            print(f"[VIGIL] Demo auto-seed skipped: {exc}")
+            print(f"[CONFLUX] Demo auto-seed skipped: {exc}")
 
 
 class CitizenReport(BaseModel):
@@ -228,7 +228,7 @@ class FederatedEventIn(BaseModel):
     confidence_score: float
     timestamp: str | None = None
     evidence_summary: str | None = None
-    source_system: str = "VIGIL"
+    source_system: str = "CONFLUX"
 
     @model_validator(mode="after")
     def _normalize_country(self):
@@ -346,7 +346,7 @@ def _create_report_record(
 async def health():
     reports = fb.get_all_citizen_reports()
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat(),
-            "product": "VIGIL", "version": "0.3.0",
+            "product": "CONFLUX", "version": "0.3.0",
             "local_country": LOCAL_COUNTRY,
             "demo_seeded": _DEMO_SEEDED,
             "citizen_reports": len(reports),
@@ -397,7 +397,7 @@ class VoiceTranscriptIn(BaseModel):
 async def process_voice_transcript(body: VoiceTranscriptIn):
     """Process a voice transcript through Gemini for translation + classification."""
     result = await asyncio.to_thread(
-        gemini_client.classify_text_report, body.transcript
+        gemini_client.classify_text_report, body.transcript, body.lang
     )
     return {
         "original": body.transcript,
@@ -412,7 +412,7 @@ async def process_voice_transcript(body: VoiceTranscriptIn):
 
 
 @app.get("/api/sensors")
-async def get_sensors(bbox: str = "76.8,28.4,77.6,28.9"):
+async def get_sensors(bbox: str | None = None):
     """Ground sensor readings for map markers — always returns data (mock fallback)."""
     try:
         readings = await asyncio.wait_for(openaq_client.fetch_all_readings(bbox), timeout=_OPENAQ_ENDPOINT_TIMEOUT)
@@ -655,7 +655,7 @@ async def list_citizen_reports():
 # ---------------------------------------------------------------------------
 
 @app.get("/api/hotspots")
-async def get_hotspots(bbox: str = "76.8,28.4,77.6,28.9"):
+async def get_hotspots(bbox: str | None = None):
     try:
         sensor_readings = await asyncio.wait_for(openaq_client.fetch_all_readings(bbox), timeout=_OPENAQ_ENDPOINT_TIMEOUT)
     except Exception:
@@ -927,7 +927,7 @@ async def export_brics_hotspots(min_confidence: float = 0.4):
         exported.append({
             "schema_version": "brics.v1",
             "origin_country": h.get("country_code", LOCAL_COUNTRY),
-            "producer": "VIGIL",
+            "producer": "CONFLUX",
             "h3_cell": h["h3_cell"],
             "lat": h["lat"],
             "lng": h["lng"],
@@ -1085,6 +1085,8 @@ async def seed_demo():
     fb.clear_federated_events()
 
     # Step 1: Seed citizen reports (fast — skip Gemini with is_demo=True)
+    import importlib
+    importlib.reload(demo_scenario)
     demo_reports = demo_scenario.get_demo_reports()
     seeded = []
     for r in demo_reports:
@@ -1098,7 +1100,7 @@ async def seed_demo():
         seeded.append(result)
 
     # Step 2: Prime satellite overrides (skip slow full hotspot recalc — frontend will poll)
-    for cell, score in demo_scenario.DEMO_SATELLITE_OVERRIDES.items():
+    for cell, score in demo_scenario.get_demo_satellite_overrides().items():
         _SATELLITE_CACHE[cell] = score
     now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -1195,11 +1197,14 @@ def _get_current_baseline_fast(h3_cell: str) -> tuple[float | None, float | None
 
 
 def _get_satellite_score(cell: str) -> float:
-    """Satellite aerosol signal — cached per cell. Earth Engine is opt-in
-    (USE_EARTH_ENGINE=true) because live EE queries take ~2s each and would
-    make /api/hotspots unusably slow for the dashboard poll loop."""
+    """Satellite aerosol signal — cached per cell."""
     if cell in _SATELLITE_CACHE:
         return _SATELLITE_CACHE[cell]
+
+    overrides = demo_scenario.get_demo_satellite_overrides()
+    if cell in overrides:
+        _SATELLITE_CACHE[cell] = overrides[cell]
+        return overrides[cell]
 
     use_ee = os.environ.get("USE_EARTH_ENGINE", "false").lower() in ("1", "true", "yes")
     score = None
@@ -1212,8 +1217,6 @@ def _get_satellite_score(cell: str) -> float:
     if score is None:
         score = _mock_satellite_score(cell)
 
-    # Demo blind-zone cells always get a strong satellite signal for the pitch.
-    score = max(score, demo_scenario.DEMO_SATELLITE_OVERRIDES.get(cell, 0.0))
     _SATELLITE_CACHE[cell] = score
     return score
 
@@ -1313,25 +1316,49 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
     spike_info = None
     if forecast_data:
         from app.services.hotspot_detection import PM25_UNHEALTHY
+        now_utc = datetime.now(timezone.utc)
         for pred in forecast_data:
             if pred["predicted_pm25"] >= PM25_UNHEALTHY:
-                spike_info = {
-                    "threshold": PM25_UNHEALTHY,
-                    "predicted_value": pred["predicted_pm25"],
-                    "hours_until": round((
-                        datetime.fromisoformat(pred["timestamp"]) - datetime.now(timezone.utc)
-                    ).total_seconds() / 3600, 1),
-                    "timestamp": pred["timestamp"],
-                }
+                hours_until = round((
+                    datetime.fromisoformat(pred["timestamp"]) - now_utc
+                ).total_seconds() / 3600, 1)
+                # Only surface spikes that are genuinely in the future
+                if hours_until > 0:
+                    spike_info = {
+                        "threshold": PM25_UNHEALTHY,
+                        "predicted_value": pred["predicted_pm25"],
+                        "hours_until": hours_until,
+                        "timestamp": pred["timestamp"],
+                    }
                 break
 
-    explanation_data = {**match, "weather": weather, "impact": impact}
-    rec_data = {
-        **match,
-        "weather": weather,
-        "impact": impact,
-        "corridor_impact": corridor_impact,
+    # Build Gemini context that matches exactly what the UI renders, so the AI
+    # narrative is consistent with the numbers shown to the user.
+    gemini_context = {
+        "h3_cell": match.get("h3_cell"),
+        "severity": match.get("severity"),
+        "confidence_score": match.get("confidence_score"),
+        "aqi_estimate": match.get("aqi_estimate"),
+        "sensor_pm25": match.get("sensor_pm25"),
+        "citizen_report_count": match.get("citizen_report_count"),
+        "explanation": match.get("explanation"),
+        "evidence_breakdown": match.get("evidence_breakdown"),
+        # Impact numbers (same as UI)
+        "population_at_risk": impact.get("population"),
+        "schools_at_risk": impact.get("schools"),
+        "hospitals_at_risk": impact.get("hospitals"),
+        # Weather (same as UI)
+        "wind_speed_kmh": weather.get("wind_speed_kmh"),
+        "wind_direction_deg": weather.get("wind_direction_deg"),
+        "temperature_c": weather.get("temperature_c"),
+        "humidity_pct": weather.get("humidity_pct"),
+        # Forecast spike (same as UI)
         "forecast_spike": spike_info,
+    }
+    explanation_data = gemini_context
+    rec_data = {
+        **gemini_context,
+        "corridor_impact": corridor_impact,
     }
 
     if skip_ai or not os.environ.get("GEMINI_API_KEY"):
@@ -1346,44 +1373,30 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
             fallback_reason="fast_mode" if skip_ai else "missing_api_key",
         )
     else:
-        try:
-            incident_result, recommendation_result = await asyncio.wait_for(
-                asyncio.gather(
-                    asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
-                    asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),
-                    return_exceptions=True,
-                ),
-                timeout=_GEMINI_EVIDENCE_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            incident_result = asyncio.TimeoutError()
-            recommendation_result = asyncio.TimeoutError()
+        # Run both Gemini calls concurrently. Each call uses _generate_with_timeout
+        # internally (18s) so they will always complete (success or fallback) within
+        # that window. We do NOT wrap with asyncio.wait_for because asyncio.to_thread
+        # threads are non-cancellable — a wait_for timeout just abandons the result
+        # and returns a mock while Gemini is still running in the background.
+        incident_result, recommendation_result = await asyncio.gather(
+            asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
+            asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),
+            return_exceptions=True,
+        )
 
         if isinstance(incident_result, Exception):
-            if isinstance(incident_result, asyncio.TimeoutError):
-                incident_explanation = gemini_client._mock_incident_explanation(
-                    explanation_data,
-                    fallback_reason="gemini_timeout",
-                )
-            else:
-                incident_explanation = gemini_client._mock_incident_explanation(
-                    explanation_data,
-                    fallback_reason=f"gemini_error: {str(incident_result)[:120]}",
-                )
+            incident_explanation = gemini_client._mock_incident_explanation(
+                explanation_data,
+                fallback_reason=f"gemini_error: {str(incident_result)[:120]}",
+            )
         else:
             incident_explanation = incident_result
 
         if isinstance(recommendation_result, Exception):
-            if isinstance(recommendation_result, asyncio.TimeoutError):
-                recommendation = gemini_client._mock_recommendation(
-                    rec_data,
-                    fallback_reason="gemini_timeout",
-                )
-            else:
-                recommendation = gemini_client._mock_recommendation(
-                    rec_data,
-                    fallback_reason=f"gemini_error: {str(recommendation_result)[:120]}",
-                )
+            recommendation = gemini_client._mock_recommendation(
+                rec_data,
+                fallback_reason=f"gemini_error: {str(recommendation_result)[:120]}",
+            )
         else:
             recommendation = recommendation_result
 
@@ -1435,3 +1448,29 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
         "recommendation": recommendation,
         "evidence_checklist": evidence_checklist,
     }
+
+
+# ---------------------------------------------------------------------------
+# Production Single-Container SPA Static Mounting
+# ---------------------------------------------------------------------------
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+if not _FRONTEND_DIST.exists():
+    _FRONTEND_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if not _FRONTEND_DIST.exists():
+    _FRONTEND_DIST = Path("/app/frontend/dist")
+
+if _FRONTEND_DIST.exists() and (_FRONTEND_DIST / "index.html").exists():
+    from fastapi.staticfiles import StaticFiles
+    from starlette.responses import FileResponse
+
+    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="API endpoint not found")
+        file_path = _FRONTEND_DIST / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_FRONTEND_DIST / "index.html")
+

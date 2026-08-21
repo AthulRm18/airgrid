@@ -15,7 +15,7 @@ export default function TrustPanel({ bricsStatus }) {
         <div className="mt-4 grid gap-3 sm:grid-cols-3">
           <ReasonCard
             title="Citizens fill sensor gaps"
-            body="OpenAQ is excellent where stations exist. VIGIL captures smoke, smell, and symptoms where official monitoring is absent or too coarse."
+            body="OpenAQ is excellent where stations exist. CONFLUX captures smoke, smell, and symptoms where official monitoring is absent or too coarse."
           />
           <ReasonCard
             title="Authorities act on one screen"

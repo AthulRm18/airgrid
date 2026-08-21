@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: conflux-app
+    runtime: docker
+    dockerfilePath: Dockerfile
+    plan: free
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-flash-lite-latest
+      - key: OPENAQ_API_KEY
+        sync: false
+      - key: USE_EARTH_ENGINE
+        value: false
+      - key: DEMO_AUTO_SEED
+        value: true

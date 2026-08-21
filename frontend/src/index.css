@@ -2,10 +2,8 @@
 @import "tailwindcss";
 
 @theme {
-  /* --- VIGIL design tokens ---
-    Shift the product away from the previous dark-ops dashboard and toward
-    a lighter, calmer surface language. Severity colors remain distinct, but
-    the base UI should feel more like a civic product than a control room.
+  /* --- CONFLUX design tokens ---
+    Clean, accessible design tokens for civic & community environmental intelligence.
   */
   --color-ink-950: #f5f7fb;
   --color-ink-900: #ffffff;

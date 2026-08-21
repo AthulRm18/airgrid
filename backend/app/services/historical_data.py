@@ -4,7 +4,7 @@ Historical PM2.5 time series for forecast training + baseline calculation.
 For the hackathon demo window, this generates a realistic 14-day hourly
 series per mock station: diurnal traffic-driven double-peak (morning +
 evening rush), weekday/weekend difference, and one deliberate agricultural-
-burning spike event — the kind of event VIGIL's fusion is built to catch
+burning spike event — the kind of event CONFLUX's fusion is built to catch
 early. It's seeded, so it's identical across runs (stable demo).
 
 For your REAL submission, replace `generate_synthetic_history()` with

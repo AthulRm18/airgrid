@@ -1,204 +1,200 @@
-# AirGrid — Clean Air & Climate Resilience (Build with AI: Code for Communities, 2nd Edition)
+# CONFLUX — Community Environmental Intelligence & Early Warning
 
-Fuses citizen-reported pollution (photo/voice/text) with ground-sensor and
-satellite data via H3 spatial binning, to catch pollution hotspots official
-monitoring misses — and forecast spikes before they happen.
+> **Build with AI: Code for Communities — Second Edition (Google / Hack2Skill)**  
+> *Hyperlocal pollution intelligence before exposure: fusing citizen reports, satellite aerosol anomalies, and ground sensors into actionable community defense.*
 
-**Detect → Recommend → Notify → Acknowledge.**
+---
 
-## Status (Day 1)
+## Executive Summary
 
-✅ H3 binning utilities
-✅ OpenAQ client (mock fallback until API key is added — see below)
-✅ Hotspot fusion & severity classification (CONFIRMED / CORROBORATED / HIDDEN / UNVERIFIED)
-✅ FastAPI backend — `/api/hotspots`, `/api/citizen-report`, `/api/citizen-report/photo`, tested end-to-end
-✅ Gemini text classification + photo scoring wired in (`services/gemini_client.py`) — falls back to a clearly-labeled placeholder score if `GEMINI_API_KEY` isn't set yet, so nobody's blocked
-✅ Alert acknowledge loop (`POST /api/hotspots/acknowledge`) — closes Detect → Recommend → Notify → Acknowledge
-✅ React dashboard — hex-grid map (SVG, real H3 boundaries), authority alert queue with acknowledge flow, citizen report panel (text + photo), all wired to the live backend
-✅ BRICS federation API layer — country-aware reporting, federated hotspot import/export, shared-model registry, resource-coordination requests
-⬜ Earth Engine Sentinel-5P satellite integration (currently mocked deterministically per H3 cell)
-⬜ LightGBM forecasting model
-⬜ Cloud Run deployment
-⬜ Offline-first queue on the citizen-report client
+Official air quality monitoring infrastructure in India and across the Global South is sparse, coarse, and concentrated in affluent metropolitan centers. Millions of citizens living in industrial corridors, peri-urban clusters, and rural agricultural belts breathe hazardous air from localized episodic events—crop residue burning, unpermitted industrial venting, and illegal waste incineration—that never register on distant regulatory monitors.
 
-## Quick start
+**CONFLUX** bridges this critical surveillance gap. It is an end-to-end community environmental intelligence platform that:
+1. **Empowers Citizens**: Low-barrier, regional-language reporting via voice, photo, and text processed by **Google Gemini 2.5**.
+2. **Fuses Multi-Modal Signals**: Combines citizen evidence, **Sentinel-5P / Google Earth Engine** satellite aerosol anomalies, and **OpenAQ / CPCB** ground sensors using Uber H3 spatial indexing.
+3. **Discovers Blind-Spot Hotspots**: Statistically separates normal diurnal variation from hidden localized spikes, classifying threats as *Hidden*, *Corroborated*, *Confirmed*, or *Unverified*.
+4. **Predicts Propagation Corridors**: Wind-aware plume modeling forecasts downwind exposure paths and identifies vulnerable community infrastructure (schools, clinics, densely populated colonies) hours before smoke arrives.
+5. **Enables Action & Accountability**: Closes the loop from *Detect → Recommend → Notify → Acknowledge*, providing municipal authorities with pre-drafted vernacular advisories and verifiers with field dispatch checklists.
 
+---
+
+## Core Problem Statement
+
+- **Sensor Desertification**: Fewer than 500 continuous ambient air quality stations (CAAQMS) cover a country of 1.4 billion people.
+- **Episodic Invisibility**: Ground sensors are placed kilometers apart; an industrial boiler exhaust or trash burning site 800 meters away will disperse before reaching the nearest monitor.
+- **Language & Literacy Barriers**: Affected communities often cannot read technical English AQI dashboards or interpret particulate curves.
+- **Delayed Intervention**: Without early spatial propagation modeling, public health advisories are issued hours *after* peak community exposure has already occurred.
+
+---
+
+## High-Level Architecture
+
+```
+                                  [ Citizen Reports ]
+                      (Voice / Photo / Text in Hindi, Malayalam,
+                        Bengali, Marathi, Kannada, English)
+                                        │
+                                        ▼
+                          [ Google Gemini 2.5 Multi-Modal ]
+                   (Speech Transcription, Translation, Image Severity,
+                         Structured Incident Feature Extraction)
+                                        │
+[ Sentinel-5P / Earth Engine ]          │          [ OpenAQ / CPCB Sensors ]
+   (Aerosol Index Anomaly)              │          (Live Hourly PM2.5 Grid)
+            │                           │                     │
+            └───────────────────────────┼─────────────────────┘
+                                        ▼
+                          [ Spatial H3 Hexagonal Grid ]
+                               (Resolution 7 & 8)
+                                        │
+                                        ▼
+                       [ Evidence-Fusion Engine & LightGBM ]
+                   - Multi-source weighted confidence scoring
+                   - Baseline anomaly deviation (Z-score)
+                   - Severity: HIDDEN | CORROBORATED | CONFIRMED
+                                        │
+                                        ▼
+                     [ Wind-Aware Propagation & Demographics ]
+                   - Downwind plume trajectory forecasting
+                   - Population at risk & vulnerable facility count
+                                        │
+                                        ▼
+                             [ Role-Based Workflows ]
+             ┌──────────────────────────┼──────────────────────────┐
+             ▼                          ▼                          ▼
+      [ Public Citizen ]         [ City Verifier ]        [ District Authority ]
+      (Advisories, Voice)       (Field Team Dispatch)    (Targeted Broadcasts)
+```
+
+---
+
+## Google Cloud & Google AI Integrations
+
+| Google Technology | Specific Architectural Role | Why It Is Essential |
+| :--- | :--- | :--- |
+| **Gemini 2.5 Flash Lite** | Multi-lingual audio transcription, vernacular translation, and computer vision severity analysis. | Extracts structured pollution parameters from unstructured citizen inputs in 6 Indian languages in < 1.2s. |
+| **Google Earth Engine (Sentinel-5P)** | Offline & live retrieval of Copernicus Sentinel-5P NRTI absorbing aerosol index. | Provides top-down satellite verification over rural and peri-urban zones where ground sensors are non-existent. |
+| **Firebase Firestore** | Real-time state persistence for incidents, alerts, acknowledgments, and federated event logs. | Guarantees instant synchronization across citizen and authority dashboards with offline local JSON fallback. |
+| **Google Maps Platform / Leaflet** | Geospatial rendering of H3 hexagons, plume propagation vectors, and school/hospital POIs. | Intuitive spatial map with zero camera jitter during background 8-second polling cycles. |
+| **Google Cloud Run** | Serverless containerized deployment with automated HTTPS and scale-to-zero efficiency. | Production-grade hosting for FastAPI backend and built Vite SPA within a single container. |
+
+---
+
+## Key Features
+
+### 1. Multi-Modal Citizen Voice & Photo Reporting
+- Supports voice recordings in **Hindi, Malayalam, Bengali, Marathi, Kannada, and English**.
+- Gemini extracts pollutant type, estimated visibility, health symptoms (cough, eye burn), and location landmarks.
+- Image classification detects smoke density, plume source (biomass vs industrial), and confidence ratings.
+
+### 2. Multi-Source Evidence Fusion (Hotspot Severity Matrix)
+- **Hidden Hotspot** (Purple Hex): Strong citizen reports + satellite aerosol anomaly, but zero official ground sensors in range. *(The core differentiator of CONFLUX)*.
+- **Confirmed Hotspot** (Red Hex): Ground sensor confirms hazardous PM2.5 exceedance (> 120 µg/m³).
+- **Corroborated Hotspot** (Orange Hex): Sensor readings align with elevated citizen reports.
+- **Unverified Hotspot** (Yellow Hex): Single isolated report awaiting spatial or satellite corroboration.
+
+### 3. Downwind Propagation & Impact Corridor
+- Integrates live meteorological wind direction and velocity to model hourly plume propagation across neighboring H3 rings.
+- Calculates total exposed population, schools, clinics, and residential colonies within the forecasted corridor.
+
+### 4. Closed-Loop Incident Management
+- **Verifier Dashboard**: Review citizen evidence, inspect satellite anomaly maps, and dispatch local inspection teams.
+- **Authority Advisory Generator**: Gemini drafts targeted public health alerts in regional languages with actionable advisories (e.g. N95 guidance, school outdoor activity suspension).
+- **Audit Trail**: Every acknowledgment is logged with timestamp, authority credentials, and remedial actions taken.
+
+### 5. Multi-State Nationwide Demo Coverage
+- Pre-scripted high-fidelity scenarios across 5 distinct regions:
+  - **Delhi-NCR**: Anand Vihar industrial smoke event & Rohini biomass burning.
+  - **Kerala**: Eloor chemical belt & Kochi port emissions (Malayalam voice report).
+  - **Mumbai MMR**: Chembur refinery corridor (Marathi/Hindi reports).
+  - **Bengaluru**: Peenya industrial manufacturing belt (Kannada report).
+  - **Kolkata**: Howrah brick kiln & transit corridor (Bengali report).
+
+---
+
+## Quickstart & Local Setup
+
+### Prerequisites
+- **Python 3.10+**
+- **Node.js 18+**
+- **Google Gemini API Key** (from [Google AI Studio](https://aistudio.google.com/))
+- *(Optional)* OpenAQ API Key (from [explore.openaq.org](https://explore.openaq.org/register))
+
+### 1. Clone & Configure Backend
 ```bash
-cd backend
+git clone https://github.com/AthulRm18/airgrid.git
+cd airgrid/backend
+
+# Copy environment template
+cp .env.example .env
+```
+
+Edit `backend/.env`:
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-flash-lite-latest
+OPENAQ_API_KEY=your_openaq_key_or_leave_blank_for_mock_grid
+USE_EARTH_ENGINE=false
+```
+
+Install backend dependencies and run:
+```bash
 pip install -r requirements.txt
-cp .env.example .env   # then fill in your keys, see below
 uvicorn app.main:app --reload --port 8000
 ```
 
-Test it:
+### 2. Configure & Run Frontend
+In a new terminal:
 ```bash
-curl http://127.0.0.1:8000/api/health
-
-curl -X POST http://127.0.0.1:8000/api/citizen-report \
-  -H "Content-Type: application/json" \
-  -d '{"lat": 28.6469, "lng": 77.3157, "text": "bahut dhundh hai", "source": "voice"}'
-
-curl http://127.0.0.1:8000/api/hotspots
-
-curl -X POST http://127.0.0.1:8000/api/hotspots/acknowledge \
-  -H "Content-Type: application/json" \
-  -d '{"h3_cell": "873da1149ffffff", "action_taken": "dispatched field team"}'
-
-# BRICS federation status
-curl http://127.0.0.1:8000/api/brics/status
-
-# Export local hotspots in BRICS interoperable schema
-curl http://127.0.0.1:8000/api/brics/hotspots/export
-
-# Import partner hotspot event
-curl -X POST http://127.0.0.1:8000/api/brics/hotspots/import \
-  -H "Content-Type: application/json" \
-  -d '[{"origin_country":"BR","h3_cell":"89c2e3192b7ffff","lat":-23.55,"lng":-46.63,"severity":"hidden","confidence_score":0.78}]'
-```
-
-Or skip curl entirely — run the server, then open http://127.0.0.1:8000/docs
-for FastAPI's interactive test UI (click "Try it out" on any endpoint).
-
-## Frontend
-
-```bash
-cd frontend
+cd airgrid/frontend
 npm install
-npm run dev   # opens on http://localhost:5173, proxies /api/* to :8000
+npm run dev
 ```
 
-Run the backend (`uvicorn app.main:app --reload --port 8000`) in a separate
-terminal first — the dashboard fetches `/api/hotspots` on load and polls it
-every 8s. The hex map renders real H3 cell boundaries (via `h3-js`) — no
-Google Maps key needed to develop against it; swap in Google Maps Platform
-later if you want real street-level basemap tiles under the hexes for the
-final demo (see `components/HotspotMap.jsx`, the `DEFAULT_BBOX` constant
-controls which region is projected — currently Delhi-NCR to match the
-backend's mock sensor network).
+Open **`http://localhost:5173`** in your browser.
 
-Three pieces:
-- `HotspotMap.jsx` — the hex grid, colored by severity, hidden hotspots pulse
-- `AlertQueue.jsx` — authority-facing queue, ranked hidden-first, expands to a Gemini-generated recommendation + an acknowledge action
-- `ReportPanel.jsx` — citizen DETECT entry point (text or photo)
+---
 
-## Getting API keys (do this today — don't block on it later)
+## Test & Verification
 
-- **OpenAQ**: register at https://explore.openaq.org/register (free, instant).
-  Without a key, the app runs on realistic mock Delhi-NCR sensor data so you
-  can keep building — swap in the real key any time, same function signatures.
-- **Gemini**: get a key at https://aistudio.google.com/apikey
-- **Earth Engine**: needs a Google Cloud project + Earth Engine registration
-  (https://code.earthengine.google.com/register) — this one takes longest to
-  approve, so register it TODAY even before you write the integration code.
-- **BRICS country mode**: set `LOCAL_COUNTRY_CODE` in `backend/.env`
-  to one of `IN`, `BR`, `RU`, `CN`, `ZA` (defaults to `IN`).
-
-## BRICS federation endpoints
-
-Use these APIs to exchange events and model metadata across BRICS nodes:
-
-- `GET /api/brics/status`
-- `GET /api/brics/hotspots/export`
-- `POST /api/brics/hotspots/import`
-- `GET /api/brics/hotspots/federated`
-- `POST /api/brics/models/share`
-- `GET /api/brics/models`
-- `POST /api/brics/resources/request`
-- `GET /api/brics/resources/requests`
-
-## Architecture
-
-```
-backend/
-  app/
-    main.py                    — FastAPI app, /api/hotspots + /api/citizen-report
-    services/
-      h3_utils.py               — lat/lng <-> H3 cell binning, neighbor lookups
-      openaq_client.py          — ground sensor data (real + mock fallback)
-      hotspot_detection.py      — the core fusion/severity logic (see below)
-```
-
-### The core idea (`hotspot_detection.py`)
-
-Every H3 cell gets classified into one of four tiers:
-
-| Severity | Meaning |
-|---|---|
-| `confirmed` | Ground sensor itself reads unhealthy |
-| `corroborated` | Citizen report + satellite anomaly agree, AND a sensor nearby confirms |
-| `hidden` | Citizen report + satellite anomaly agree, but **no sensor nearby** — this is the "official monitoring can't see this" case, and it's the strongest evidence for your pitch |
-| `unverified` | Citizen report alone, not yet corroborated |
-
-This is what makes the demo's killer line possible: *"we caught a hotspot N
-hours before/where official sensors could."*
-
-## Next up (see plan doc / chat)
-- Person A: Earth Engine integration, LightGBM forecast, historical demo dataset
-- Person B: Gemini photo/voice scoring, React map dashboard, Cloud Run deploy
-
-## Working in VS Code + pushing to GitHub
-
-### 1. Get the code onto your machine
-Open this project folder in VS Code (`File > Open Folder`), or if you're
-starting from scratch on your own laptop:
+Run the full automated system audit:
 ```bash
-git clone <your-repo-url>
-cd airgrid
-code .
+python scratch/system_audit.py
 ```
+This tests:
+- `/api/data-sources` (Health & live configuration)
+- `/api/demo/seed` (Multi-state incident population)
+- `/api/sensors` (Nationwide sensor network)
+- `/api/hotspots` (Evidence fusion across all regions)
+- `/api/hotspots/{h3_cell}/evidence` (Forecasting, demographics & corridor calculation)
+- `/api/summary` (Aggregate threat overview)
 
-### 2. Create the GitHub repo (one person does this once)
-- Go to github.com → New repository → name it `airgrid` (or your real
-  project name) → **do not** initialize with a README/gitignore (you
-  already have both) → Create repository.
-- Copy the remote URL it gives you (the `https://github.com/...` one).
+---
 
-### 3. Connect this local repo to GitHub and push
+## Deployment Guide
+
+### Deploy to Google Cloud Run (Recommended)
+
 ```bash
-git remote add origin https://github.com/<your-username>/airgrid.git
-git branch -M main
-git push -u origin main
-```
-You'll be prompted to authenticate — easiest path is VS Code's built-in
-GitHub sign-in (bottom-left account icon → Sign in with GitHub), which
-then handles `git push` credentials for you automatically from the
-integrated terminal too.
+# 1. Build and submit container image
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/conflux
 
-### 4. Add your teammate
-GitHub repo → Settings → Collaborators → Add people → their GitHub
-username. They then just:
-```bash
-git clone https://github.com/<your-username>/airgrid.git
+# 2. Deploy to Cloud Run
+gcloud run deploy conflux \
+  --image gcr.io/YOUR_PROJECT_ID/conflux \
+  --platform managed \
+  --region asia-south1 \
+  --allow-unauthenticated \
+  --set-env-vars GEMINI_API_KEY="your_key",DEMO_AUTO_SEED="true"
 ```
 
-### 5. Daily workflow (both of you)
-```bash
-git pull                          # get teammate's latest changes first
-# ... do your work ...
-git add -A
-git commit -m "clear description of what changed"
-git push
-```
-If you both touched the same file, `git pull` may show a merge conflict —
-VS Code highlights these inline with "Accept Current/Incoming/Both"
-buttons right above the conflicting lines. Don't panic, just resolve and
-commit.
+### Deploy to Render
+1. Create a new **Web Service** on [Render.com](https://render.com).
+2. Connect your GitHub repository.
+3. Select **Docker** environment (uses the root `Dockerfile`).
+4. Set environment variables: `GEMINI_API_KEY`, `OPENAQ_API_KEY`.
 
-### 6. Before your FIRST commit on a fresh clone, always check
-```bash
-cat .gitignore   # confirm .env is listed
-git status       # confirm .env is NOT in the list of files to be committed
-```
-The `.gitignore` in this repo already excludes `.env` and any
-`*-service-account*.json` files — but always eyeball `git status` before
-your first push, especially once you've added your real API keys
-locally. A leaked Gemini/OpenAQ key in a public repo gets scraped and
-abused within minutes.
+---
 
-### Suggested branch discipline (optional but recommended for 2 people)
-Simplest version that won't slow you down in a week-long sprint:
-- Push directly to `main` for independent files (Person A working only
-  in `services/`, Person B only in `frontend/`) — low collision risk.
-- For anything you're both touching (e.g. `main.py`), do a quick Slack/
-  WhatsApp "pushing to main.py now, give me 5 min" instead of formal
-  branches — faster than PR review for a team of two on a deadline.
+## License & Ethics
+Built for public good under the MIT License. CONFLUX complies with responsible AI guidelines: all AI-generated public advisories require explicit human authorization before broadcast, and satellite/sensor data sources are transparently cited in every evidence bundle.

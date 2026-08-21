@@ -9,6 +9,7 @@ geospatial calculations, real data, and deterministic scoring.
 Needs GEMINI_API_KEY in .env (get one free at https://aistudio.google.com/apikey).
 Falls back to clearly-labeled heuristic scores if no key is set.
 """
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -97,6 +98,18 @@ def _generate_with_fallback(client: genai.Client, contents) -> str:
     raise RuntimeError("Gemini generation failed with no candidate models attempted")
 
 
+def _generate_with_timeout(client: genai.Client, contents, timeout_seconds: float = 18.0) -> str:
+    """Blocking wrapper: tries Gemini with a wall-clock timeout.
+    Raises TimeoutError if Gemini does not respond in time."""
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+        future = ex.submit(_generate_with_fallback, client, contents)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError:
+            raise TimeoutError(f"Gemini did not respond within {timeout_seconds}s")
+
+
 PHOTO_PROMPT = """You are an air-quality field analyst reviewing a citizen-submitted photo.
 Analyze the visible environmental conditions.
 
@@ -117,15 +130,22 @@ Return ONLY valid JSON, no markdown fences:
 Be conservative — an ambiguous photo should get lower confidence, not a guessed-high score."""
 
 TEXT_PROMPT_TEMPLATE = """You are processing a citizen air-quality report,
-submitted as text, SMS, or a voice-note transcript. It may be in any
-language spoken in India, Brazil, Russia, China, or South Africa.
+submitted as text, SMS, or a voice-note transcript.
+
+The report may be written in ANY language. Specifically supported regional
+languages include (but are not limited to):
+  - English, Hindi (हिंदी), Malayalam (മലയാളം), Tamil (தமிழ்),
+    Bengali (বাংলা), Kannada (ಕನ್ನಡ), Telugu (తెలుగు), Marathi (मराठी),
+    Gujarati (ગુજરાતી), Odia (ଓଡ଼ିଆ), Portuguese, Russian, Chinese, Zulu.
+
+Language hint from browser: {lang_hint}
 
 Report: "{report_text}"
 
 Return ONLY valid JSON, no markdown fences:
 {{
   "translated_text": "<English translation, or original if already English>",
-  "detected_language": "<language name>",
+  "detected_language": "<language name, e.g. Malayalam>",
   "event_type": "<one of: smoke, haze, dust, chemical_smell, burning, unclear>",
   "severity": "<one of: low, moderate, high, severe>",
   "possible_source": "<one of: vehicular, industrial, agricultural_burning, dust, construction, unclear>",
@@ -158,8 +178,17 @@ Incident data: {data}"""
 
 RECOMMENDATION_PROMPT = """You are advising a district pollution-control officer.
 Given this incident data (including hotspot confidence, forecast, weather,
-affected population, schools, hospitals, and evidence), generate a
+immediate cell impact, downwind corridor impact, and evidence), generate a
 structured recommended response.
+
+DATA STRUCTURE EXPLANATION:
+- "population_at_risk", "schools_at_risk", "hospitals_at_risk" represent the IMMEDIATE HOTSPOT CELL.
+- "corridor_impact" (with total_population_at_risk, total_schools, total_hospitals, cell_count) represents the predicted DOWNWIND EXPOSURE CORRIDOR over time.
+
+GUIDELINES FOR ACTIONS:
+- If recommending actions for the immediate source/cell, use the immediate cell numbers (e.g. schools_at_risk, hospitals_at_risk).
+- If recommending actions for the broader downwind trajectory/plume, refer to the corridor numbers (e.g. corridor_impact.total_schools across corridor_impact.cell_count cells).
+- Ensure all quoted statistics match the exact numbers in the incident data.
 
 Return ONLY valid JSON, no markdown fences:
 {{
@@ -176,7 +205,7 @@ Return ONLY valid JSON, no markdown fences:
   "advisory_text": "<draft advisory text for public, if needed, else null>"
 }}
 
-Be specific — name the likely cause, the affected area, and concrete actions.
+Be specific — name the likely cause, the affected area/corridor, and concrete actions.
 Do NOT hedge or be vague.
 
 Incident data: {data}"""
@@ -206,7 +235,7 @@ def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         }
 
 
-def classify_text_report(report_text: str) -> dict:
+def classify_text_report(report_text: str, lang_hint: str = "auto") -> dict:
     client = _get_client()
     if client is None:
         return {
@@ -217,11 +246,21 @@ def classify_text_report(report_text: str) -> dict:
             "extracted_location_hint": None, "confidence": 0.0,
         }
     try:
-        text = _generate_with_fallback(
-            client,
-            TEXT_PROMPT_TEMPLATE.format(report_text=report_text),
+        prompt = TEXT_PROMPT_TEMPLATE.format(
+            report_text=report_text,
+            lang_hint=lang_hint or "auto",
         )
+        text = _generate_with_timeout(client, prompt, timeout_seconds=18.0)
         return _parse_json(text)
+    except TimeoutError:
+        return {
+            "translated_text": report_text, "detected_language": lang_hint or "unknown",
+            "event_type": "unclear", "severity": "moderate",
+            "possible_source": "unclear",
+            "haze_score": 0.4, "reported_symptoms": [],
+            "extracted_location_hint": None, "confidence": 0.0,
+            "error": "Gemini timed out — saved with raw text",
+        }
     except Exception as e:
         return {
             "translated_text": report_text, "detected_language": "unknown",
@@ -239,11 +278,14 @@ def generate_incident_explanation(cell_data: dict) -> dict:
     if client is None:
         return _mock_incident_explanation(cell_data, fallback_reason="missing_api_key")
     try:
-        text = _generate_with_fallback(
+        text = _generate_with_timeout(
             client,
             INCIDENT_EXPLANATION_PROMPT.format(data=json.dumps(cell_data)),
+            timeout_seconds=18.0,
         )
         return _parse_json(text)
+    except TimeoutError:
+        return _mock_incident_explanation(cell_data, fallback_reason="gemini_timeout: response exceeded 18s")
     except Exception as e:
         return _mock_incident_explanation(cell_data, fallback_reason=f"gemini_error: {str(e)[:120]}")
 
@@ -254,11 +296,14 @@ def generate_structured_recommendation(cell_data: dict) -> dict:
     if client is None:
         return _mock_recommendation(cell_data, fallback_reason="missing_api_key")
     try:
-        text = _generate_with_fallback(
+        text = _generate_with_timeout(
             client,
             RECOMMENDATION_PROMPT.format(data=json.dumps(cell_data)),
+            timeout_seconds=18.0,
         )
         return _parse_json(text)
+    except TimeoutError:
+        return _mock_recommendation(cell_data, fallback_reason="gemini_timeout: response exceeded 18s")
     except Exception as e:
         return _mock_recommendation(cell_data, fallback_reason=f"gemini_error: {str(e)[:120]}")
 

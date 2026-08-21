@@ -8,6 +8,15 @@ const MAP_CENTER = [28.63, 77.22];
 const MAP_ZOOM = 11;
 const BRICS_COLORS = { CN: "#e0524a", BR: "#4fb8ac", RU: "#e8a23d", ZA: "#a870e8", IN: "#1a73e8" };
 
+const CITIES = [
+  { id: "all", label: "🇮🇳 All India", center: [21.5, 78.9], zoom: 5 },
+  { id: "delhi", label: "Delhi-NCR", center: [28.63, 77.22], zoom: 11 },
+  { id: "kerala", label: "Kerala / Kochi", center: [10.05, 76.32], zoom: 12 },
+  { id: "mumbai", label: "Mumbai", center: [19.06, 72.88], zoom: 11 },
+  { id: "bengaluru", label: "Bengaluru", center: [12.97, 77.59], zoom: 11 },
+  { id: "kolkata", label: "Kolkata", center: [22.57, 88.36], zoom: 11 },
+];
+
 function h3Boundary(cell) {
   try {
     return cellToBoundary(cell).map(([lat, lng]) => [lat, lng]);
@@ -41,6 +50,32 @@ function ZoomWatcher({ onZoom }) {
   return null;
 }
 
+/** Handles smooth camera transitions ONLY when user explicitly changes city or selects a new cell */
+function MapController({ targetView, selectedCell, hotspots }) {
+  const map = useMap();
+  const prevCellRef = useRef(null);
+  const prevTargetRef = useRef(null);
+
+  useEffect(() => {
+    if (targetView && targetView !== prevTargetRef.current) {
+      prevTargetRef.current = targetView;
+      map.flyTo(targetView.center, targetView.zoom, { duration: 1.0 });
+    }
+  }, [targetView, map]);
+
+  useEffect(() => {
+    if (selectedCell && selectedCell !== prevCellRef.current) {
+      prevCellRef.current = selectedCell;
+      const match = hotspots.find((h) => h.h3_cell === selectedCell);
+      if (match && Number.isFinite(match.lat) && Number.isFinite(match.lng)) {
+        map.flyTo([match.lat, match.lng], 13, { duration: 0.9 });
+      }
+    }
+  }, [selectedCell, hotspots, map]);
+
+  return null;
+}
+
 export default function HotspotMap({
   hotspots,
   selectedCell,
@@ -49,11 +84,22 @@ export default function HotspotMap({
   refreshToken,
   flashCells = [],
   bricsEvents = [],
+  activeRegion = "all",
+  onRegionChange,
 }) {
   const [propagation, setPropagation] = useState(null);
   const [sensors, setSensors] = useState([]);
   const [reports, setReports] = useState([]);
   const [zoom, setZoom] = useState(MAP_ZOOM);
+  const [targetView, setTargetView] = useState(null);
+
+  // Sync targetView when activeRegion changes from parent
+  useEffect(() => {
+    const found = CITIES.find((c) => c.id === activeRegion);
+    if (found) {
+      setTargetView({ center: found.center, zoom: found.zoom });
+    }
+  }, [activeRegion]);
 
   useEffect(() => {
     fetch("/api/sensors")
@@ -102,13 +148,13 @@ export default function HotspotMap({
     );
   }, [reports, hotspots]);
 
-  const showStations = zoom >= 11;
+  const showStations = zoom >= 10;
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden">
       <div className="flex shrink-0 items-center justify-between border-b border-[#dde3ea] bg-white px-4 py-2">
         <div className="flex items-center gap-3">
-          <span className="text-[11px] font-medium text-[#314154]">Delhi-NCR pollution grid</span>
+          <span className="text-[11px] font-medium text-[#314154]">National environmental grid</span>
           {bricsEvents.length > 0 && (
             <div className="flex items-center gap-1">
               {bricsEvents.map((ev) => (
@@ -128,6 +174,27 @@ export default function HotspotMap({
         <Legend />
       </div>
 
+      {/* City quick navigator pill bar */}
+      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#dde3ea] bg-[#f9fafb] px-3 py-1.5">
+        <span className="shrink-0 text-[10px] font-medium text-[#7b8fa1] mr-1">Region:</span>
+        {CITIES.map((c) => (
+          <button
+            key={c.id}
+            onClick={() => {
+              setTargetView({ center: c.center, zoom: c.zoom });
+              onRegionChange?.(c.id);
+            }}
+            className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+              activeRegion === c.id
+                ? "bg-[#1a73e8] text-white"
+                : "border border-[#dde3ea] bg-white text-[#314154] hover:border-[#1a73e8] hover:text-[#1a73e8]"
+            }`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex-1">
         <MapContainer
           center={MAP_CENTER}
@@ -138,6 +205,7 @@ export default function HotspotMap({
           scrollWheelZoom
           preferCanvas
         >
+          <MapController targetView={targetView} selectedCell={selectedCell} hotspots={hotspots} />
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             attribution="© OSM"

@@ -18,8 +18,18 @@ import hashlib
 from app.services.h3_utils import cell_to_latlng
 
 
-# Delhi-NCR approximate bounding box for density heuristic
-_DELHI_CENTER = (28.6139, 77.2090)
+# Major Indian urban centers for density heuristic
+_URBAN_CENTERS_INDIA = [
+    (28.6139, 77.2090),  # Delhi-NCR
+    (19.0760, 72.8777),  # Mumbai
+    (12.9716, 77.5946),  # Bengaluru
+    (13.0827, 80.2707),  # Chennai
+    (22.5726, 88.3639),  # Kolkata
+    (17.3850, 78.4867),  # Hyderabad
+    (9.9312, 76.2673),   # Kochi / Kerala
+    (18.5204, 73.8567),  # Pune
+    (23.0225, 72.5714),  # Ahmedabad
+]
 
 
 def get_cell_demographics(h3_cell: str) -> dict:
@@ -27,13 +37,11 @@ def get_cell_demographics(h3_cell: str) -> dict:
     lat, lng = cell_to_latlng(h3_cell)
     h = int(hashlib.sha256(h3_cell.encode()).hexdigest(), 16)
 
-    # Distance from city center → population density proxy
-    # Closer to center = denser population
-    dist_km = _haversine(lat, lng, *_DELHI_CENTER)
-    density_factor = max(0.2, 1.0 - dist_km / 40.0)  # 0.2-1.0
+    # Distance to nearest major urban center → population density proxy
+    dist_km = min(_haversine(lat, lng, clat, clng) for clat, clng in _URBAN_CENTERS_INDIA)
+    density_factor = max(0.2, 1.0 - dist_km / 50.0)  # 0.2-1.0
 
-    # Population: H3 res-7 cell ≈ 5 km² — Delhi avg ~11k/km²
-    # but varies from 25k/km² (center) to 2k/km² (outskirts)
+    # Population: H3 res-7 cell ≈ 5 km²
     base_pop = int(5000 * density_factor + (h % 8000))
     population = max(1200, min(base_pop, 52000))
 

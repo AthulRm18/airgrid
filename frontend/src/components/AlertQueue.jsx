@@ -3,8 +3,35 @@ import { Bell, CheckCircle2, Eye, Loader2, Shield, TrendingUp, XCircle } from "l
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { SEVERITY, SEVERITY_ORDER } from "../lib/severity";
 
-export default function AlertQueue({ hotspots, selectedCell, onSelectCell, onAcknowledge, onOpenEvidence, onRefresh, session, sessionToken }) {
-  const sorted = [...hotspots].sort(
+const REGION_FILTERS = [
+  { id: "all", label: "All" },
+  { id: "delhi", label: "Delhi", test: (h) => h.lat >= 28 && h.lat <= 29 && h.lng >= 76.5 && h.lng <= 77.8 },
+  { id: "kerala", label: "Kerala", test: (h) => h.lat >= 8.2 && h.lat <= 12.5 && h.lng >= 75.0 && h.lng <= 77.8 },
+  { id: "mumbai", label: "Mumbai", test: (h) => h.lat >= 18.5 && h.lat <= 19.5 && h.lng >= 72.5 && h.lng <= 73.5 },
+  { id: "bengaluru", label: "BLR", test: (h) => h.lat >= 12.5 && h.lat <= 13.5 && h.lng >= 77.2 && h.lng <= 78.0 },
+  { id: "kolkata", label: "Kolkata", test: (h) => h.lat >= 22.0 && h.lat <= 23.0 && h.lng >= 88.0 && h.lng <= 89.0 },
+];
+
+export default function AlertQueue({
+  hotspots,
+  selectedCell,
+  onSelectCell,
+  onAcknowledge,
+  onOpenEvidence,
+  onRefresh,
+  session,
+  sessionToken,
+  activeRegion = "all",
+  onRegionChange,
+}) {
+  const currentRegion = activeRegion || "all";
+  const regionFilter = REGION_FILTERS.find((r) => r.id === currentRegion);
+  const filteredHotspots = hotspots.filter((h) => {
+    if (!regionFilter || regionFilter.id === "all") return true;
+    return regionFilter.test ? regionFilter.test(h) : true;
+  });
+
+  const sorted = [...filteredHotspots].sort(
     (a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity)
   );
 
@@ -13,11 +40,29 @@ export default function AlertQueue({ hotspots, selectedCell, onSelectCell, onAck
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-white">
-      <div className="shrink-0 border-b border-[#dde3ea] px-4 py-2.5">
-        <h2 className="text-sm font-semibold text-[#1a1f2e]">Action queue</h2>
-        <p className="text-[11px] text-[#7b8fa1]">
-          {actionable.length} actionable · {unverified.length} pending
-        </p>
+      <div className="shrink-0 border-b border-[#dde3ea] px-4 py-2">
+        <div className="flex items-center justify-between mb-1.5">
+          <h2 className="text-sm font-semibold text-[#1a1f2e]">Action queue</h2>
+          <span className="text-[11px] text-[#7b8fa1]">
+            {actionable.length} actionable · {unverified.length} pending
+          </span>
+        </div>
+        {/* Region filter pills */}
+        <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+          {REGION_FILTERS.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => onRegionChange?.(r.id)}
+              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                currentRegion === r.id
+                  ? "bg-[#1a73e8] text-white"
+                  : "bg-[#f0f4f9] text-[#5f6f86] hover:bg-[#e4ebf5]"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-[#eef1f5]">

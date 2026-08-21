@@ -1,5 +1,5 @@
 """
-Hotspot detection & evidence-fusion logic — VIGIL's core differentiator.
+Hotspot detection & evidence-fusion logic — CONFLUX's core differentiator.
 
 Replaces the boolean severity logic with a weighted **evidence-fusion
 confidence score** that combines:
@@ -118,7 +118,7 @@ def _compute_sensor_signal(sensor_pm25: float | None) -> float:
 def _compute_coverage_score(h3_cell: str, sensor_coverage: set[str]) -> float:
     """0-1: how much does the ABSENCE of sensor coverage contribute
     to the need for this alert? Higher score = less coverage = more
-    need for VIGIL's intelligence."""
+    need for CONFLUX's intelligence."""
     nearby = neighbors(h3_cell, k=1) & sensor_coverage
     if h3_cell in sensor_coverage:
         return 0.1  # Cell itself has a sensor — coverage is good

@@ -1,5 +1,5 @@
 """
-Wind-aware spatial pollution propagation — VIGIL's major visual feature.
+Wind-aware spatial pollution propagation — CONFLUX's major visual feature.
 
 Given a hotspot cell, current wind direction/speed, and pollution
 intensity, estimates which neighboring H3 cells are likely to be

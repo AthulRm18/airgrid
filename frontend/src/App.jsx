@@ -10,7 +10,7 @@ import LoginPage from "./components/LoginPage";
 import BricsPanel from "./components/BricsPanel";
 import ResearchPanel from "./components/ResearchPanel";
 import ReportsFeed from "./components/ReportsFeed";
-import VigilLogo from "./components/VigilLogo";
+import ConfluxLogo from "./components/ConfluxLogo";
 import StatusToast, { SEVERITY_TOAST } from "./components/StatusToast";
 
 const POLL_MS = 8000;
@@ -27,9 +27,9 @@ function App() {
   const [seedMsg, setSeedMsg] = useState("");
   const [backendOk, setBackendOk] = useState(true);
   const [session, setSession] = useState(null);
-  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem("vigil_token") || "");
+  const [sessionToken, setSessionToken] = useState(() => localStorage.getItem("conflux_token") || localStorage.getItem("vigil_token") || "");
   const [authError, setAuthError] = useState("");
-  const [authChecking, setAuthChecking] = useState(!!localStorage.getItem("vigil_token"));
+  const [authChecking, setAuthChecking] = useState(!!(localStorage.getItem("conflux_token") || localStorage.getItem("vigil_token")));
   const [bricsCount, setBricsCount] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
   const [reportsBump, setReportsBump] = useState(0);
@@ -39,6 +39,7 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [dataSources, setDataSources] = useState(null);
   const [showTour, setShowTour] = useState(false);
+  const [activeRegion, setActiveRegion] = useState("all");
   const autoSeeded = useRef(false);
   const healthFails = useRef(0);
   const hotspotFails = useRef(0);
@@ -142,8 +143,10 @@ function App() {
       .then((d) => {
         if (d) {
           setSession(d.user);
-          localStorage.setItem("vigil_user", JSON.stringify(d.user));
+          localStorage.setItem("conflux_user", JSON.stringify(d.user));
         } else {
+          localStorage.removeItem("conflux_token");
+          localStorage.removeItem("conflux_user");
           localStorage.removeItem("vigil_token");
           localStorage.removeItem("vigil_user");
           setSessionToken("");
@@ -172,8 +175,8 @@ function App() {
       });
       if (!res.ok) throw new Error();
       const { session_token, user } = await res.json();
-      localStorage.setItem("vigil_token", session_token);
-      localStorage.setItem("vigil_user", JSON.stringify(user));
+      localStorage.setItem("conflux_token", session_token);
+      localStorage.setItem("conflux_user", JSON.stringify(user));
       setSessionToken(session_token);
       setSession(user);
     } catch {
@@ -183,6 +186,8 @@ function App() {
 
   async function handleLogout() {
     try { await fetch("/api/auth/logout", { method: "POST", headers: headers() }); } catch { /* ok */ }
+    localStorage.removeItem("conflux_token");
+    localStorage.removeItem("conflux_user");
     localStorage.removeItem("vigil_token");
     localStorage.removeItem("vigil_user");
     setSessionToken("");
@@ -194,21 +199,15 @@ function App() {
     setSeedMsg("Seeding…");
     try {
       const res = await fetch("/api/demo/seed", { method: "POST" });
-      if (!res.ok) throw new Error();
+      if (!res.ok) throw new Error("Seed failed");
       const d = await res.json();
-      setSeedMsg(`${d.seeded} reports · ${d.brics_events} BRICS events`);
+      setSeedMsg(`Seeded ${d.seeded ?? "all"} reports`);
       setReportsBump((b) => b + 1);
-      // Poll until hotspots appear (seed no longer blocks on recalc)
-      for (let i = 0; i < 8; i++) {
-        await refreshHotspots();
-        await refreshBrics();
-        if (lastHotspots.current.length > 0) break;
-        await new Promise((r) => setTimeout(r, 1500));
-      }
+      setTimeout(() => refresh(), 400);
     } catch {
       setSeedMsg("Seed failed — check backend is running");
     } finally {
-      setSeeding(false);
+      setTimeout(() => { setSeeding(false); setSeedMsg(""); }, 3000);
     }
   }
 
@@ -283,10 +282,10 @@ function App() {
     <div className="flex h-screen flex-col overflow-hidden bg-[#f0f4f9] text-[#16202c]">
       <header className="flex shrink-0 items-center justify-between border-b border-[#dde3ea] bg-white px-4 py-2.5">
         <div className="flex items-center gap-2.5">
-          <VigilLogo size={28} />
+          <ConfluxLogo size={28} />
           <div>
-            <span className="text-sm font-bold text-[#1a1f2e]">VIGIL</span>
-            <span className="ml-2 text-[11px] text-[#7b8fa1]">India node · BRICS</span>
+            <span className="text-sm font-bold text-[#1a1f2e]">CONFLUX</span>
+            <span className="ml-2 text-[11px] text-[#7b8fa1]">Community Environmental Intelligence</span>
             {dataSources && (
               <span className="ml-1 text-[9px] text-[#7b8fa1]">
                 · {dataSources.openaq === "configured" ? "OpenAQ live" : "OpenAQ demo"}
@@ -296,8 +295,6 @@ function App() {
             )}
           </div>
         </div>
-
-        <SummaryCards backendOk={backendOk} refreshToken={refreshToken} inline />
 
         <div className="flex items-center gap-2">
           {bricsCount > 0 && (
@@ -351,6 +348,8 @@ function App() {
             refreshToken={refreshToken}
             flashCells={flashCells}
             bricsEvents={bricsEvents}
+            activeRegion={activeRegion}
+            onRegionChange={setActiveRegion}
           />
           <ReportsFeed refreshToken={refreshToken} reportsBump={reportsBump} pendingReport={pendingReport} />
         </div>
@@ -362,6 +361,8 @@ function App() {
                 onReportSubmitted={handleReportSubmitted}
                 session={session}
                 sessionToken={sessionToken}
+                activeRegion={activeRegion}
+                onRegionChange={setActiveRegion}
               />
             </div>
           )}
@@ -382,6 +383,8 @@ function App() {
               onRefresh={refreshHotspots}
               session={session}
               sessionToken={sessionToken}
+              activeRegion={activeRegion}
+              onRegionChange={setActiveRegion}
             />
           </div>
         </div>

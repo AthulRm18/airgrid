@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Loader2, User, Search, Building2, FlaskConical, Globe2 } from "lucide-react";
-import VigilLogo from "./VigilLogo";
+import ConfluxLogo from "./ConfluxLogo";
 
 const ROLES = [
   {
@@ -67,26 +67,26 @@ export default function LoginPage({ onLogin, authError }) {
       {/* Left — problem context */}
       <div className="hidden lg:flex lg:w-[42%] flex-col justify-center px-12 xl:px-16 bg-white border-r border-[#dde3ea]">
         <div className="flex items-center gap-3 mb-8">
-          <VigilLogo size={40} />
+          <ConfluxLogo size={40} />
           <span className="text-xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>
-            VIGIL
+            CONFLUX
           </span>
         </div>
 
         <p className="text-xs font-semibold uppercase tracking-widest text-[#1a73e8] mb-3">
-          Clean Air & Climate Resilience
+          Clean Air & Community Climate Resilience
         </p>
         <h1 className="text-2xl font-bold text-[#16202c] leading-snug mb-4" style={{ fontFamily: "Manrope, sans-serif" }}>
-          Hyperlocal pollution detection for Indian cities
+          Hyperlocal pollution intelligence for Indian communities
         </h1>
         <p className="text-sm text-[#5f6f86] leading-relaxed mb-6">
-          Official sensors miss industrial emissions, agricultural burning, and seasonal smog at the neighborhood level. VIGIL fuses citizen reports, satellite data, and ground sensors to find pollution hotspots before they spread.
+          Official sensors miss industrial emissions, agricultural burning, and neighborhood smog in sensor-blind zones. CONFLUX fuses citizen reports, satellite data, and ground sensors to discover pollution hotspots before communities are exposed.
         </p>
 
         <div className="space-y-3 text-sm text-[#314154]">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgba(26,115,232,0.1)] text-[10px] font-bold text-[#1a73e8]">1</span>
-            <span>Citizens report smoke via text, voice, or photo</span>
+            <span>Citizens report smoke via regional text, voice, or photo</span>
           </div>
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgba(26,115,232,0.1)] text-[10px] font-bold text-[#1a73e8]">2</span>
@@ -94,7 +94,7 @@ export default function LoginPage({ onLogin, authError }) {
           </div>
           <div className="flex items-start gap-3">
             <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[rgba(26,115,232,0.1)] text-[10px] font-bold text-[#1a73e8]">3</span>
-            <span>Authorities verify and issue targeted public alerts</span>
+            <span>Authorities verify and issue targeted community alerts</span>
           </div>
         </div>
       </div>
@@ -102,9 +102,9 @@ export default function LoginPage({ onLogin, authError }) {
       {/* Right — role picker */}
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 bg-[#f0f4f9]">
         <div className="lg:hidden mb-8 flex flex-col items-center gap-2">
-          <VigilLogo size={48} />
-          <h1 className="text-2xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>VIGIL</h1>
-          <p className="text-sm text-[#5f6f86]">Hyperlocal Air Intelligence</p>
+          <ConfluxLogo size={48} />
+          <h1 className="text-2xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>CONFLUX</h1>
+          <p className="text-sm text-[#5f6f86]">Hyperlocal Community Air Intelligence</p>
         </div>
 
         <div className="w-full max-w-md">

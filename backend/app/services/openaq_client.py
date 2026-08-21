@@ -27,63 +27,90 @@ OPENAQ_BASE_URL = "https://api.openaq.org/v3"
 
 # Fail fast during local demos: if live OpenAQ is slow/unreachable,
 # immediately fall back to deterministic mock readings.
-OPENAQ_REQUEST_TIMEOUT = float(os.environ.get("OPENAQ_REQUEST_TIMEOUT", "6"))
-OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "12"))
-OPENAQ_LOCATIONS_LIMIT = int(os.environ.get("OPENAQ_LOCATIONS_LIMIT", "8"))
-OPENAQ_MAX_CONCURRENCY = int(os.environ.get("OPENAQ_MAX_CONCURRENCY", "8"))
-OPENAQ_REAL_CACHE_TTL_SECONDS = float(os.environ.get("OPENAQ_REAL_CACHE_TTL_SECONDS", "1800"))
+OPENAQ_REQUEST_TIMEOUT = float(os.environ.get("OPENAQ_REQUEST_TIMEOUT", "5"))
+OPENAQ_TOTAL_TIMEOUT = float(os.environ.get("OPENAQ_TOTAL_TIMEOUT", "10"))
+OPENAQ_LOCATIONS_LIMIT = int(os.environ.get("OPENAQ_LOCATIONS_LIMIT", "6"))
+OPENAQ_MAX_CONCURRENCY = int(os.environ.get("OPENAQ_MAX_CONCURRENCY", "4"))
+OPENAQ_REAL_CACHE_TTL_SECONDS = float(os.environ.get("OPENAQ_REAL_CACHE_TTL_SECONDS", "300"))  # 5 min cache minimum
 
 _LAST_REAL_READINGS: list[dict] = []
 _LAST_REAL_READINGS_TS: float = 0.0
-_FORCE_MOCK = False  # set True after 401/403 so we stop hammering a dead key
+_LAST_NETWORK_ATTEMPT_TS: float = 0.0
+_MIN_NETWORK_INTERVAL_SECONDS = 60.0  # At most 1 network call per minute
+_FORCE_MOCK = False  # Set True after ANY 401, 403, 429 or auth issue to protect account
 
 
 def _get_api_key() -> Optional[str]:
     if _FORCE_MOCK:
         return None
-    return os.environ.get("OPENAQ_API_KEY")
+    key = os.environ.get("OPENAQ_API_KEY")
+    if not key or key.strip() in ("", "none", "null"):
+        return None
+    return key.strip()
 
 
 def _mark_key_invalid(reason: str):
     global _FORCE_MOCK
     if not _FORCE_MOCK:
         _FORCE_MOCK = True
-        print(f"[OpenAQ] API key rejected ({reason}) — using demo sensors until you set a new OPENAQ_API_KEY.")
+        print(f"[OpenAQ Safety Guard] Rate limit or auth signal received ({reason}). Switching to offline CPCB demo grid to protect account.")
 
 
-async def fetch_locations(bbox: str, limit: int = OPENAQ_LOCATIONS_LIMIT) -> list[dict]:
+def _check_rate_limit_headers(headers: dict):
+    remaining = headers.get("x-ratelimit-remaining") or headers.get("X-RateLimit-Remaining")
+    if remaining is not None:
+        try:
+            if int(remaining) <= 1:
+                _mark_key_invalid(f"Rate limit remaining={remaining}")
+        except Exception:
+            pass
+
+
+async def fetch_locations(bbox: str | None = None, limit: int = OPENAQ_LOCATIONS_LIMIT) -> list[dict]:
     """
-    Fetch monitoring station locations within a bounding box.
-    bbox: "min_lng,min_lat,max_lng,max_lat"
+    Fetch monitoring station locations within a bounding box, or nationwide if bbox is None.
+    Guarded with rate-limit circuit breaker.
     """
+    global _LAST_NETWORK_ATTEMPT_TS
     api_key = _get_api_key()
     if not api_key:
         return _mock_locations(bbox, limit)
 
+    # Throttling guard: enforce minimum interval between live network attempts
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if (now_ts - _LAST_NETWORK_ATTEMPT_TS) < _MIN_NETWORK_INTERVAL_SECONDS:
+        return _mock_locations(bbox, limit)
+
+    _LAST_NETWORK_ATTEMPT_TS = now_ts
     try:
         def _call():
             return requests.get(
                 f"{OPENAQ_BASE_URL}/locations",
-                params={"bbox": bbox, "limit": limit},
+                params={"bbox": bbox, "limit": limit} if bbox else {"limit": limit, "countries_id": 99},
                 headers={"X-API-Key": api_key},
                 timeout=OPENAQ_REQUEST_TIMEOUT,
             )
 
         resp = await asyncio.to_thread(_call)
-        if resp.status_code in (401, 403):
+        _check_rate_limit_headers(resp.headers)
+
+        if resp.status_code in (401, 403, 429):
             _mark_key_invalid(f"HTTP {resp.status_code}")
             return _mock_locations(bbox, limit)
-        resp.raise_for_status()
+
+        if resp.status_code >= 400:
+            _mark_key_invalid(f"HTTP {resp.status_code}")
+            return _mock_locations(bbox, limit)
+
         return resp.json().get("results", [])
-    except Exception:
+    except Exception as exc:
+        _mark_key_invalid(f"Network error: {str(exc)[:60]}")
         return _mock_locations(bbox, limit)
 
 
 async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
     """
-    Fetch the latest readings for a location and normalize to our internal shape:
-      {parameter: {name, units}, value, datetime: {utc}, coordinates: {latitude, longitude}}
-    Works with both real v3 API and mock data.
+    Fetch the latest readings for a location. Guarded with rate-limit circuit breaker.
     """
     api_key = _get_api_key()
     if not api_key:
@@ -99,17 +126,19 @@ async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
             )
 
         resp = await asyncio.to_thread(_call)
-        if resp.status_code in (401, 403):
+        _check_rate_limit_headers(resp.headers)
+
+        if resp.status_code in (401, 403, 429):
             _mark_key_invalid(f"HTTP {resp.status_code}")
             return _mock_measurements(location_id)
-        resp.raise_for_status()
+
+        if resp.status_code >= 400:
+            return _mock_measurements(location_id)
+
         raw = resp.json().get("results", [])
     except Exception:
         return _mock_measurements(location_id)
 
-    # Normalize both known v3 shapes to internal format.
-    # Shape A (older docs): each item has a "sensors" array with parameter details.
-    # Shape B (current in production): each item has sensorsId/locationsId/value and coordinates.
     normalized = []
     coords = loc.get("coordinates", {})
     for item in raw:
@@ -128,7 +157,6 @@ async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
                 })
             continue
 
-        # Current response form where parameter details are omitted.
         if item.get("value") is None:
             continue
         item_coords = item.get("coordinates") or coords
@@ -144,22 +172,58 @@ async def fetch_latest_measurements(location_id: int, loc: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Mock data — realistic Delhi-NCR sensor network
+# Mock data — realistic multi-city India sensor network (CPCB nodes)
 # ---------------------------------------------------------------------------
 
-_DELHI_NCR_STATIONS = [
-    {"id": 1001, "name": "Anand Vihar",        "lat": 28.6469, "lng": 77.3157},
-    {"id": 1002, "name": "R K Puram",           "lat": 28.5636, "lng": 77.1861},
-    {"id": 1003, "name": "Punjabi Bagh",        "lat": 28.6742, "lng": 77.1310},
-    {"id": 1004, "name": "Okhla Phase 2",       "lat": 28.5313, "lng": 77.2803},
-    {"id": 1005, "name": "Dwarka Sector 8",     "lat": 28.5709, "lng": 77.0723},
-    {"id": 1006, "name": "Noida Sector 62",     "lat": 28.6274, "lng": 77.3701},
-    {"id": 1007, "name": "Gurugram Sector 51",  "lat": 28.4421, "lng": 77.0721},
-    {"id": 1008, "name": "Mandir Marg",         "lat": 28.6364, "lng": 77.2007},
+_INDIA_STATIONS = [
+    # Delhi-NCR
+    {"id": 1001, "name": "Anand Vihar, Delhi",        "lat": 28.6469, "lng": 77.3157, "base": 185},
+    {"id": 1002, "name": "R K Puram, Delhi",           "lat": 28.5636, "lng": 77.1861, "base": 110},
+    {"id": 1003, "name": "Punjabi Bagh, Delhi",        "lat": 28.6742, "lng": 77.1310, "base": 130},
+    {"id": 1004, "name": "Okhla Phase 2, Delhi",       "lat": 28.5313, "lng": 77.2803, "base": 125},
+    {"id": 1005, "name": "Dwarka Sector 8, Delhi",     "lat": 28.5709, "lng": 77.0723, "base": 95},
+    {"id": 1006, "name": "Noida Sector 62, UP",        "lat": 28.6274, "lng": 77.3701, "base": 160},
+    {"id": 1007, "name": "Gurugram Sector 51, HR",     "lat": 28.4421, "lng": 77.0721, "base": 120},
+    # Mumbai MMR
+    {"id": 2001, "name": "Bandra Kurla Complex, Mumbai", "lat": 19.0657, "lng": 72.8687, "base": 115},
+    {"id": 2002, "name": "Chembur Industrial, Mumbai",   "lat": 19.0522, "lng": 72.9005, "base": 150},
+    {"id": 2003, "name": "Colaba, Mumbai",               "lat": 18.9067, "lng": 72.8147, "base": 75},
+    # Bengaluru
+    {"id": 3001, "name": "BTM Layout, Bengaluru",       "lat": 12.9166, "lng": 77.6101, "base": 65},
+    {"id": 3002, "name": "Peenya Industrial, Bengaluru","lat": 13.0285, "lng": 77.5197, "base": 135},
+    {"id": 3003, "name": "Whitefield, Bengaluru",       "lat": 12.9698, "lng": 77.7500, "base": 85},
+    # Kerala / Kochi
+    {"id": 4001, "name": "Vyttila Hub, Kochi",          "lat": 9.9656,  "lng": 76.3219, "base": 70},
+    {"id": 4002, "name": "Kacheripady, Kochi",          "lat": 9.9880,  "lng": 76.2820, "base": 60},
+    {"id": 4003, "name": "Pattom, Thiruvananthapuram",  "lat": 8.5241,  "lng": 76.9366, "base": 45},
+    # Kolkata
+    {"id": 5001, "name": "Victoria Memorial, Kolkata",  "lat": 22.5448, "lng": 88.3426, "base": 105},
+    {"id": 5002, "name": "Howrah Industrial, WB",       "lat": 22.5958, "lng": 88.2636, "base": 165},
+    # Hyderabad & Chennai
+    {"id": 6001, "name": "Sanathnagar, Hyderabad",      "lat": 17.4565, "lng": 78.4439, "base": 140},
+    {"id": 7001, "name": "Manali, Chennai",             "lat": 13.1667, "lng": 80.2667, "base": 145},
 ]
 
+_DELHI_NCR_STATIONS = _INDIA_STATIONS
 
-def _mock_locations(bbox: str, limit: int) -> list[dict]:
+
+def _mock_locations(bbox: str | None = None, limit: int | None = None) -> list[dict]:
+    stations = _INDIA_STATIONS
+    if bbox:
+        try:
+            parts = [float(x.strip()) for x in bbox.split(",")]
+            if len(parts) == 4:
+                min_lng, min_lat, max_lng, max_lat = parts
+                in_bbox = [
+                    s for s in stations
+                    if min_lat <= s["lat"] <= max_lat and min_lng <= s["lng"] <= max_lng
+                ]
+                if in_bbox:
+                    stations = in_bbox
+        except Exception:
+            pass
+
+    max_len = limit if limit and bbox else len(stations)
     return [
         {
             "id": s["id"],
@@ -167,17 +231,16 @@ def _mock_locations(bbox: str, limit: int) -> list[dict]:
             "coordinates": {"latitude": s["lat"], "longitude": s["lng"]},
             "country": {"code": "IN"},
         }
-        for s in _DELHI_NCR_STATIONS[:limit]
+        for s in stations[:max_len]
     ]
 
 
 def _mock_measurements(location_id: int) -> list[dict]:
     """Generates a plausible PM2.5 reading with deterministic noise per station."""
     random.seed(location_id * 7 + int(datetime.now().minute / 10))
-    hot_stations = {1001, 1006}  # Anand Vihar, Noida — classic Delhi hotspots
-    base = 180 if location_id in hot_stations else 90
-    pm25 = max(10, base + random.gauss(0, 25))
-    station = next((s for s in _DELHI_NCR_STATIONS if s["id"] == location_id), None)
+    station = next((s for s in _INDIA_STATIONS if s["id"] == location_id), None)
+    base = station.get("base", 90) if station else 90
+    pm25 = max(10, base + random.gauss(0, 15))
     coords = {"latitude": station["lat"], "longitude": station["lng"]} if station else {}
     return [{
         "parameter": {"name": "pm25", "units": "µg/m³"},
@@ -187,13 +250,22 @@ def _mock_measurements(location_id: int) -> list[dict]:
     }]
 
 
-async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
+async def fetch_all_readings(bbox: str | None = None) -> list[dict]:
     """
-    Fetch all stations in a bbox and their latest PM2.5 readings.
+    Fetch all stations in a bbox (or nationwide if None) and their latest PM2.5 readings.
     Returns [{lat, lng, pm25, station_name, timestamp, source}] ready for H3 binning.
-    Fetches all stations concurrently with individual error handling.
+    Guarded with pre-fetch caching and rate-limit circuit breakers.
     """
     global _LAST_REAL_READINGS, _LAST_REAL_READINGS_TS
+
+    # 1. Early return from memory cache (5-minute TTL) if valid nationwide data exists
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if _LAST_REAL_READINGS and len(_LAST_REAL_READINGS) >= 15 and (now_ts - _LAST_REAL_READINGS_TS) <= OPENAQ_REAL_CACHE_TTL_SECONDS:
+        return _LAST_REAL_READINGS
+
+    # 2. If no key is set or safety circuit breaker is active, use offline demo grid immediately
+    if not _get_api_key():
+        return await _fetch_mock_readings(bbox)
 
     try:
         locations = await asyncio.wait_for(
@@ -266,8 +338,8 @@ async def fetch_all_readings(bbox: str = "76.8,28.4,77.6,28.9") -> list[dict]:
     return readings
 
 
-async def _fetch_mock_readings(bbox: str) -> list[dict]:
-    """Deterministic Delhi-NCR mock readings — used when no API key or live data is empty."""
+async def _fetch_mock_readings(bbox: str | None = None) -> list[dict]:
+    """Realistic multi-city India mock readings — used when no API key or live data is empty."""
     locations = _mock_locations(bbox, limit=100)
     readings: list[dict] = []
     for loc in locations:
