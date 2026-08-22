@@ -72,6 +72,10 @@ def _ensure_initialized(force_retry: bool = False):
             resolved_path = str(backend_dir / "service-account.json")
         elif (backend_dir.parent / "service-account.json").exists():
             resolved_path = str(backend_dir.parent / "service-account.json")
+        elif Path("/etc/secrets/service-account.json").exists():
+            resolved_path = "/etc/secrets/service-account.json"
+        elif Path(f"/etc/secrets/{p.name}").exists():
+            resolved_path = f"/etc/secrets/{p.name}"
 
         if service_account and resolved_path:
             credentials = ee.ServiceAccountCredentials(service_account, resolved_path)

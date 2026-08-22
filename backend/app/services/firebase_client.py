@@ -66,6 +66,10 @@ def _init_firebase():
                         resolved = backend_dir / p.name
                     elif (backend_dir.parent / p.name).exists():
                         resolved = backend_dir.parent / p.name
+                    elif Path("/etc/secrets/service-account.json").exists():
+                        resolved = Path("/etc/secrets/service-account.json")
+                    elif Path(f"/etc/secrets/{p.name}").exists():
+                        resolved = Path(f"/etc/secrets/{p.name}")
 
                     if resolved:
                         cred = credentials.Certificate(str(resolved))
