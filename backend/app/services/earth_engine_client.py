@@ -16,6 +16,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to the key path and GCP_PROJECT_ID.
 """
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import ee
 
@@ -25,37 +26,44 @@ _initialized = False
 _init_error: str | None = None
 
 
-def _ensure_initialized():
+def _ensure_initialized(force_retry: bool = False):
     global _initialized, _init_error
-    if _initialized:
+    if _initialized and not force_retry:
         return
-    if _init_error:
+    if _init_error and not force_retry:
         raise RuntimeError(_init_error)
 
-    project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT")
-    service_account = os.environ.get("EE_SERVICE_ACCOUNT")
-    key_path = (
-        os.environ.get("EE_PRIVATE_KEY_PATH")
-        or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        or "./ee-service-account.json"
-    )
+    project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT") or "cognitive-late"
+    service_account = os.environ.get("EE_SERVICE_ACCOUNT") or "firebase-adminsdk-fbsvc@cognitive-late.iam.gserviceaccount.com"
+    key_path_env = os.environ.get("EE_PRIVATE_KEY_PATH") or os.environ.get("FIREBASE_CREDENTIALS") or "./service-account.json"
+
+    resolved_path = None
+    p = Path(key_path_env)
+    backend_dir = Path(__file__).resolve().parents[2]
+    if p.exists():
+        resolved_path = str(p)
+    elif (backend_dir / key_path_env).exists():
+        resolved_path = str(backend_dir / key_path_env)
+    elif (backend_dir / p.name).exists():
+        resolved_path = str(backend_dir / p.name)
+    elif (backend_dir / "service-account.json").exists():
+        resolved_path = str(backend_dir / "service-account.json")
 
     try:
-        if service_account and os.path.exists(key_path):
-            credentials = ee.ServiceAccountCredentials(service_account, key_path)
+        if service_account and resolved_path:
+            credentials = ee.ServiceAccountCredentials(service_account, resolved_path)
             ee.Initialize(credentials, project=project_id)
-        elif os.path.exists(key_path) and project_id:
-            # Service-account JSON via Application Default Credentials path
-            os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", key_path)
+        elif resolved_path and project_id:
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = resolved_path
             ee.Initialize(project=project_id)
         elif project_id:
             ee.Initialize(project=project_id)
         else:
             raise RuntimeError(
-                "Set GCP_PROJECT_ID and EE_PRIVATE_KEY_PATH (service account JSON). "
-                "See earth_engine_client.py docstring."
+                "Set GCP_PROJECT_ID and EE_PRIVATE_KEY_PATH (service account JSON)."
             )
         _initialized = True
+        _init_error = None
         print(f"[Earth Engine] Initialized (project={project_id})")
     except Exception as exc:
         _init_error = str(exc)
@@ -74,7 +82,7 @@ def is_configured() -> bool:
 def status() -> dict:
     """Return EE readiness for /api/data-sources."""
     try:
-        _ensure_initialized()
+        _ensure_initialized(force_retry=True)
         return {"ok": True, "detail": "initialized"}
     except Exception as exc:
         msg = str(exc)
