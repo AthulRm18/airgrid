@@ -15,6 +15,7 @@ Setup (your GCP project already has Earth Engine API enabled):
 Or set GOOGLE_APPLICATION_CREDENTIALS to the key path and GCP_PROJECT_ID.
 """
 import os
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -35,21 +36,43 @@ def _ensure_initialized(force_retry: bool = False):
 
     project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get("GOOGLE_CLOUD_PROJECT") or "cognitive-late"
     service_account = os.environ.get("EE_SERVICE_ACCOUNT") or "firebase-adminsdk-fbsvc@cognitive-late.iam.gserviceaccount.com"
+    raw_json = (
+        os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+        or os.environ.get("EE_SERVICE_ACCOUNT_JSON")
+    )
     key_path_env = os.environ.get("EE_PRIVATE_KEY_PATH") or os.environ.get("FIREBASE_CREDENTIALS") or "./service-account.json"
 
-    resolved_path = None
-    p = Path(key_path_env)
-    backend_dir = Path(__file__).resolve().parents[2]
-    if p.exists():
-        resolved_path = str(p)
-    elif (backend_dir / key_path_env).exists():
-        resolved_path = str(backend_dir / key_path_env)
-    elif (backend_dir / p.name).exists():
-        resolved_path = str(backend_dir / p.name)
-    elif (backend_dir / "service-account.json").exists():
-        resolved_path = str(backend_dir / "service-account.json")
+    if key_path_env and key_path_env.strip().startswith("{") and key_path_env.strip().endswith("}"):
+        raw_json = key_path_env.strip()
 
     try:
+        if raw_json:
+            try:
+                parsed = json.loads(raw_json)
+                sa = parsed.get("client_email", service_account)
+                credentials = ee.ServiceAccountCredentials(sa, key_data=raw_json)
+                ee.Initialize(credentials, project=project_id)
+                _initialized = True
+                _init_error = None
+                print(f"[Earth Engine] Initialized with key_data (project={project_id})")
+                return
+            except Exception as e:
+                print(f"[Earth Engine] Raw JSON init failed: {e}")
+
+        resolved_path = None
+        p = Path(key_path_env)
+        backend_dir = Path(__file__).resolve().parents[2]
+        if p.exists():
+            resolved_path = str(p)
+        elif (backend_dir / key_path_env).exists():
+            resolved_path = str(backend_dir / key_path_env)
+        elif (backend_dir / p.name).exists():
+            resolved_path = str(backend_dir / p.name)
+        elif (backend_dir / "service-account.json").exists():
+            resolved_path = str(backend_dir / "service-account.json")
+        elif (backend_dir.parent / "service-account.json").exists():
+            resolved_path = str(backend_dir.parent / "service-account.json")
+
         if service_account and resolved_path:
             credentials = ee.ServiceAccountCredentials(service_account, resolved_path)
             ee.Initialize(credentials, project=project_id)
