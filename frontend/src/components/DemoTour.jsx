@@ -18,7 +18,7 @@ const STEPS = [
     id: "hotspot",
     role: "System",
     title: "Evidence fusion detects hotspots",
-    description: "CONFLUX combines citizen reports, satellite aerosol data, and ground sensors. Blind-spot zones with no official monitoring are flagged in purple.",
+    description: "AirGrid combines citizen reports, satellite aerosol data, and ground sensors. Blind-spot zones with no official monitoring are flagged in purple.",
     action: "Click any hexagon on the map to inspect evidence.",
     dataFn: async () => {
       const r = await fetch("/api/hotspots");

@@ -176,7 +176,7 @@ DEMO_BRICS_EVENTS = [
         "severity": "corroborated",
         "confidence_score": 0.74,
         "evidence_summary": "Beijing node: PM2.5 spike aligned with transboundary wind corridor toward northern India.",
-        "source_system": "CONFLUX-CN",
+        "source_system": "AirGrid-CN",
     },
     {
         "schema_version": "brics.v1",
@@ -187,7 +187,7 @@ DEMO_BRICS_EVENTS = [
         "severity": "confirmed",
         "confidence_score": 0.68,
         "evidence_summary": "São Paulo: Industrial corridor smoke event — shared for model calibration.",
-        "source_system": "CONFLUX-BR",
+        "source_system": "AirGrid-BR",
     },
     {
         "schema_version": "brics.v1",
@@ -198,7 +198,7 @@ DEMO_BRICS_EVENTS = [
         "severity": "corroborated",
         "confidence_score": 0.61,
         "evidence_summary": "Moscow region: Seasonal biomass burning pattern matches forecast model training set.",
-        "source_system": "CONFLUX-RU",
+        "source_system": "AirGrid-RU",
     },
     {
         "schema_version": "brics.v1",
@@ -209,7 +209,7 @@ DEMO_BRICS_EVENTS = [
         "severity": "hidden",
         "confidence_score": 0.58,
         "evidence_summary": "Johannesburg east: Sensor-blind zone detected via citizen reports only.",
-        "source_system": "CONFLUX-ZA",
+        "source_system": "AirGrid-ZA",
     },
 ]
 

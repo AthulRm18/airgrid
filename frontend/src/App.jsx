@@ -300,7 +300,7 @@ function App() {
         <div className="flex items-center gap-2.5">
           <ConfluxLogo size={28} />
           <div>
-            <span className="text-sm font-bold text-[#1a1f2e]">CONFLUX</span>
+            <span className="text-sm font-bold text-[#1a1f2e]">AirGrid</span>
             <span className="ml-2 text-[11px] text-[#7b8fa1]">Community Environmental Intelligence</span>
             {dataSources && (
               <span className="ml-1 text-[9px] text-[#7b8fa1]">

@@ -58,7 +58,7 @@ ROLE_AUTHORITY = "authority"
 ROLE_RESEARCHER = "researcher"
 ROLE_COORDINATOR = "coordinator"
 
-app = FastAPI(title="CONFLUX API", version="0.3.0",
+app = FastAPI(title="AirGrid API", version="0.3.0",
               description="Community environmental intelligence & early warning before exposure.")
 
 app.add_middleware(
@@ -353,7 +353,7 @@ def _create_report_record(
 async def health():
     reports = fb.get_all_citizen_reports()
     return {"status": "ok", "time": datetime.now(timezone.utc).isoformat(),
-            "product": "CONFLUX", "version": "0.3.0",
+            "product": "AirGrid", "version": "0.3.0",
             "local_country": LOCAL_COUNTRY,
             "demo_seeded": _DEMO_SEEDED,
             "citizen_reports": len(reports),
@@ -934,7 +934,7 @@ async def export_brics_hotspots(min_confidence: float = 0.4):
         exported.append({
             "schema_version": "brics.v1",
             "origin_country": h.get("country_code", LOCAL_COUNTRY),
-            "producer": "CONFLUX",
+            "producer": "AirGrid",
             "h3_cell": h["h3_cell"],
             "lat": h["lat"],
             "lng": h["lng"],

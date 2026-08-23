@@ -1,4 +1,4 @@
-# CONFLUX — Community Environmental Intelligence & Early Warning
+# AirGrid — Community Environmental Intelligence & Early Warning
 
 > **Build with AI: Code for Communities — Second Edition (Google / Hack2Skill)**  
 > *Hyperlocal pollution intelligence before exposure: fusing citizen reports, satellite aerosol anomalies, and ground sensors into actionable community defense.*
@@ -9,7 +9,7 @@
 
 Official air quality monitoring infrastructure in India and across the Global South is sparse, coarse, and concentrated in affluent metropolitan centers. Millions of citizens living in industrial corridors, peri-urban clusters, and rural agricultural belts breathe hazardous air from localized episodic events—crop residue burning, unpermitted industrial venting, and illegal waste incineration—that never register on distant regulatory monitors.
 
-**CONFLUX** bridges this critical surveillance gap. It is an end-to-end community environmental intelligence platform that:
+**AirGrid** bridges this critical surveillance gap. It is an end-to-end community environmental intelligence platform that:
 1. **Empowers Citizens**: Low-barrier, regional-language reporting via voice, photo, and text processed by **Google Gemini 2.5**.
 2. **Fuses Multi-Modal Signals**: Combines citizen evidence, **Sentinel-5P / Google Earth Engine** satellite aerosol anomalies, and **OpenAQ / CPCB** ground sensors using Uber H3 spatial indexing.
 3. **Discovers Blind-Spot Hotspots**: Statistically separates normal diurnal variation from hidden localized spikes, classifying threats as *Hidden*, *Corroborated*, *Confirmed*, or *Unverified*.
@@ -88,7 +88,7 @@ Official air quality monitoring infrastructure in India and across the Global So
 - Image classification detects smoke density, plume source (biomass vs industrial), and confidence ratings.
 
 ### 2. Multi-Source Evidence Fusion (Hotspot Severity Matrix)
-- **Hidden Hotspot** (Purple Hex): Strong citizen reports + satellite aerosol anomaly, but zero official ground sensors in range. *(The core differentiator of CONFLUX)*.
+- **Hidden Hotspot** (Purple Hex): Strong citizen reports + satellite aerosol anomaly, but zero official ground sensors in range. *(The core differentiator of AirGrid)*.
 - **Confirmed Hotspot** (Red Hex): Ground sensor confirms hazardous PM2.5 exceedance (> 120 µg/m³).
 - **Corroborated Hotspot** (Orange Hex): Sensor readings align with elevated citizen reports.
 - **Unverified Hotspot** (Yellow Hex): Single isolated report awaiting spatial or satellite corroboration.
@@ -177,11 +177,11 @@ This tests:
 
 ```bash
 # 1. Build and submit container image
-gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/conflux
+gcloud builds submit --tag gcr.io/YOUR_PROJECT_ID/airgrid
 
 # 2. Deploy to Cloud Run
-gcloud run deploy conflux \
-  --image gcr.io/YOUR_PROJECT_ID/conflux \
+gcloud run deploy airgrid \
+  --image gcr.io/YOUR_PROJECT_ID/airgrid \
   --platform managed \
   --region asia-south1 \
   --allow-unauthenticated \
@@ -197,4 +197,4 @@ gcloud run deploy conflux \
 ---
 
 ## License & Ethics
-Built for public good under the MIT License. CONFLUX complies with responsible AI guidelines: all AI-generated public advisories require explicit human authorization before broadcast, and satellite/sensor data sources are transparently cited in every evidence bundle.
+Built for public good under the MIT License. AirGrid complies with responsible AI guidelines: all AI-generated public advisories require explicit human authorization before broadcast, and satellite/sensor data sources are transparently cited in every evidence bundle.

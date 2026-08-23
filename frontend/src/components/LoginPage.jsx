@@ -69,7 +69,7 @@ export default function LoginPage({ onLogin, authError }) {
         <div className="flex items-center gap-3 mb-8">
           <ConfluxLogo size={40} />
           <span className="text-xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>
-            CONFLUX
+            AirGrid
           </span>
         </div>
 
@@ -80,7 +80,7 @@ export default function LoginPage({ onLogin, authError }) {
           Hyperlocal pollution intelligence for Indian communities
         </h1>
         <p className="text-sm text-[#5f6f86] leading-relaxed mb-6">
-          Official sensors miss industrial emissions, agricultural burning, and neighborhood smog in sensor-blind zones. CONFLUX fuses citizen reports, satellite data, and ground sensors to discover pollution hotspots before communities are exposed.
+          Official sensors miss industrial emissions, agricultural burning, and neighborhood smog in sensor-blind zones. AirGrid fuses citizen reports, satellite data, and ground sensors to discover pollution hotspots before communities are exposed.
         </p>
 
         <div className="space-y-3 text-sm text-[#314154]">
@@ -103,7 +103,7 @@ export default function LoginPage({ onLogin, authError }) {
       <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 bg-[#f0f4f9]">
         <div className="lg:hidden mb-8 flex flex-col items-center gap-2">
           <ConfluxLogo size={48} />
-          <h1 className="text-2xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>CONFLUX</h1>
+          <h1 className="text-2xl font-bold text-[#16202c]" style={{ fontFamily: "Manrope, sans-serif" }}>AirGrid</h1>
           <p className="text-sm text-[#5f6f86]">Hyperlocal Community Air Intelligence</p>
         </div>
 
