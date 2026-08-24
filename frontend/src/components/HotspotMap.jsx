@@ -86,6 +86,7 @@ export default function HotspotMap({
   bricsEvents = [],
   activeRegion = "all",
   onRegionChange,
+  onOpenBrics,
 }) {
   const [propagation, setPropagation] = useState(null);
   const [sensors, setSensors] = useState([]);
@@ -156,19 +157,23 @@ export default function HotspotMap({
         <div className="flex items-center gap-3">
           <span className="text-[11px] font-medium text-[#314154]">National environmental grid</span>
           {bricsEvents.length > 0 && (
-            <div className="flex items-center gap-1">
+            <button
+              onClick={() => onOpenBrics?.()}
+              className="flex items-center gap-1 hover:opacity-80 transition cursor-pointer"
+              title="Click to view BRICS Federated Feed"
+            >
               {bricsEvents.map((ev) => (
                 <span
                   key={ev.dedupe_key || ev.origin_country}
-                  className="rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white"
+                  className="rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white shadow-xs"
                   style={{ background: BRICS_COLORS[ev.origin_country] || "#a870e8" }}
                   title={`${ev.origin_country}: ${ev.evidence_summary}`}
                 >
                   {ev.origin_country}
                 </span>
               ))}
-              <span className="text-[9px] text-[#7b8fa1]">· BRICS feed</span>
-            </div>
+              <span className="text-[9px] text-[#7b5ea8] font-medium hover:underline">· BRICS feed</span>
+            </button>
           )}
         </div>
         <Legend />

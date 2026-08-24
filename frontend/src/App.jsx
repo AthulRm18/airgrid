@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { Zap, LogOut, Loader2, WifiOff, BookOpen } from "lucide-react";
+import { Zap, LogOut, Loader2, WifiOff, BookOpen, Globe2 } from "lucide-react";
 import SummaryCards from "./components/SummaryCards";
 import HotspotMap from "./components/HotspotMap";
 import AlertQueue from "./components/AlertQueue";
@@ -31,6 +31,7 @@ function App() {
   const [authError, setAuthError] = useState("");
   const [authChecking, setAuthChecking] = useState(!!(localStorage.getItem("conflux_token") || localStorage.getItem("vigil_token")));
   const [bricsCount, setBricsCount] = useState(0);
+  const [showBrics, setShowBrics] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
   const [reportsBump, setReportsBump] = useState(0);
   const [pendingReport, setPendingReport] = useState(null);
@@ -314,11 +315,14 @@ function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {bricsCount > 0 && (
-            <span className="rounded-full border border-[#a870e8]/30 bg-[#a870e8]/8 px-2 py-0.5 text-[10px] font-medium text-[#7b5ea8]">
-              BRICS {bricsCount}
-            </span>
-          )}
+          <button
+            onClick={() => setShowBrics((v) => !v)}
+            className="flex items-center gap-1.5 rounded-full border border-[#a870e8]/40 bg-[#a870e8]/10 px-2.5 py-1 text-[11px] font-semibold text-[#7b5ea8] hover:bg-[#a870e8]/20 transition cursor-pointer"
+            title="Click to view BRICS Climate Federation"
+          >
+            <Globe2 size={12} className="text-[#a870e8]" />
+            BRICS {bricsCount > 0 ? bricsCount : 4}
+          </button>
 
           <button onClick={() => setShowTour(true)}
             className="flex items-center gap-1 rounded-full border border-[#dde3ea] px-2.5 py-1 text-[11px] text-[#314154] hover:border-[#1a73e8]">
@@ -367,6 +371,7 @@ function App() {
             bricsEvents={bricsEvents}
             activeRegion={activeRegion}
             onRegionChange={setActiveRegion}
+            onOpenBrics={() => setShowBrics(true)}
           />
           <ReportsFeed refreshToken={refreshToken} reportsBump={reportsBump} pendingReport={pendingReport} />
         </div>
@@ -403,21 +408,21 @@ function App() {
               sessionToken={sessionToken}
               activeRegion={activeRegion}
               onRegionChange={setActiveRegion}
+              bricsEvents={bricsEvents}
             />
           </div>
         </div>
 
-        {showBrics && (
-          <div className="flex w-[280px] shrink-0 flex-col overflow-hidden">
-            <BricsPanel refreshToken={refreshToken} />
-          </div>
-        )}
         {showResearch && (
           <div className="flex w-[300px] shrink-0 flex-col overflow-hidden">
             <ResearchPanel hotspots={hotspots} refreshToken={refreshToken} />
           </div>
         )}
       </main>
+
+      {showBrics && (
+        <BricsPanel refreshToken={refreshToken} onClose={() => setShowBrics(false)} />
+      )}
 
       {evidenceCell && (
         <EvidencePanel

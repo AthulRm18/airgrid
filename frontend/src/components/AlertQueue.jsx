@@ -10,6 +10,7 @@ const REGION_FILTERS = [
   { id: "mumbai", label: "Mumbai", test: (h) => h.lat >= 18.5 && h.lat <= 19.5 && h.lng >= 72.5 && h.lng <= 73.5 },
   { id: "bengaluru", label: "BLR", test: (h) => h.lat >= 12.5 && h.lat <= 13.5 && h.lng >= 77.2 && h.lng <= 78.0 },
   { id: "kolkata", label: "Kolkata", test: (h) => h.lat >= 22.0 && h.lat <= 23.0 && h.lng >= 88.0 && h.lng <= 89.0 },
+  { id: "brics", label: "BRICS" },
 ];
 
 export default function AlertQueue({
@@ -24,10 +25,13 @@ export default function AlertQueue({
   sessionToken,
   activeRegion = "all",
   onRegionChange,
+  bricsEvents = [],
 }) {
   const currentRegion = activeRegion || "all";
+  const isBricsTab = currentRegion === "brics";
   const regionFilter = REGION_FILTERS.find((r) => r.id === currentRegion);
   const filteredHotspots = hotspots.filter((h) => {
+    if (isBricsTab) return false;
     if (!regionFilter || regionFilter.id === "all") return true;
     return regionFilter.test ? regionFilter.test(h) : true;
   });
@@ -67,48 +71,82 @@ export default function AlertQueue({
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-[#eef1f5]">
-        {actionable.map((hotspot, index) => (
-          <AlertRow
-            key={hotspot.h3_cell}
-            hotspot={hotspot}
-            index={index + 1}
-            selected={selectedCell === hotspot.h3_cell}
-            onSelect={() => onSelectCell(hotspot.h3_cell)}
-            onAcknowledge={onAcknowledge}
-            onOpenEvidence={onOpenEvidence}
-            onRefresh={onRefresh}
-            onPatchHotspot={onPatchHotspot}
-            session={session}
-            sessionToken={sessionToken}
-          />
-        ))}
+        {isBricsTab ? (
+          bricsEvents.length === 0 ? (
+            <div className="px-4 py-8 text-center text-xs text-[#7b8fa1]">
+              No federated events in feed. Click <strong className="text-[#1a1f2e]">Seed demo</strong> to populate cross-border signals.
+            </div>
+          ) : (
+            bricsEvents.map((ev, i) => {
+              const flag = ev.origin_country === "CN" ? "🇨🇳 China" : ev.origin_country === "BR" ? "🇧🇷 Brazil" : ev.origin_country === "RU" ? "🇷🇺 Russia" : "🇿🇦 South Africa";
+              return (
+                <div key={ev.dedupe_key || i} className="p-3.5 hover:bg-[#f8fafc] transition border-b border-[#eef1f5]">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#1a1f2e] flex items-center gap-1.5">
+                      <span>{flag}</span>
+                      <span className="text-[10px] text-[#7b5ea8] font-semibold bg-[#a870e8]/10 px-1.5 py-0.5 rounded">brics.v1</span>
+                    </span>
+                    <span className="text-[11px] font-semibold text-[#1a73e8]">
+                      {Math.round((ev.confidence_score || 0.8) * 100)}% Conf
+                    </span>
+                  </div>
+                  <p className="mt-1.5 text-xs text-[#5f6f86] leading-relaxed">
+                    {ev.evidence_summary || "Transboundary aerosol anomaly stream."}
+                  </p>
+                  <div className="mt-2 flex items-center justify-between text-[10px] text-[#7b8fa1]">
+                    <span className="font-mono">{ev.h3_cell?.slice(0, 12)}…</span>
+                    <span className="font-medium text-[#16a34a]">Federated node active</span>
+                  </div>
+                </div>
+              );
+            })
+          )
+        ) : (
+          <>
+            {actionable.map((hotspot, index) => (
+              <AlertRow
+                key={hotspot.h3_cell}
+                hotspot={hotspot}
+                index={index + 1}
+                selected={selectedCell === hotspot.h3_cell}
+                onSelect={() => onSelectCell(hotspot.h3_cell)}
+                onAcknowledge={onAcknowledge}
+                onOpenEvidence={onOpenEvidence}
+                onRefresh={onRefresh}
+                onPatchHotspot={onPatchHotspot}
+                session={session}
+                sessionToken={sessionToken}
+              />
+            ))}
 
-        {unverified.length > 0 && (
-          <div className="bg-[#f9fafb] px-4 py-1 text-[10px] uppercase tracking-wider text-[#7b8fa1]">
-            Gathering evidence
-          </div>
-        )}
-        {unverified.slice(0, 5).map((hotspot, index) => (
-          <AlertRow
-            key={hotspot.h3_cell}
-            hotspot={hotspot}
-            index={actionable.length + index + 1}
-            selected={selectedCell === hotspot.h3_cell}
-            onSelect={() => onSelectCell(hotspot.h3_cell)}
-            onAcknowledge={onAcknowledge}
-            onOpenEvidence={onOpenEvidence}
-            onRefresh={onRefresh}
-            onPatchHotspot={onPatchHotspot}
-            session={session}
-            sessionToken={sessionToken}
-            compact
-          />
-        ))}
+            {unverified.length > 0 && (
+              <div className="bg-[#f9fafb] px-4 py-1 text-[10px] uppercase tracking-wider text-[#7b8fa1]">
+                Gathering evidence
+              </div>
+            )}
+            {unverified.slice(0, 5).map((hotspot, index) => (
+              <AlertRow
+                key={hotspot.h3_cell}
+                hotspot={hotspot}
+                index={actionable.length + index + 1}
+                selected={selectedCell === hotspot.h3_cell}
+                onSelect={() => onSelectCell(hotspot.h3_cell)}
+                onAcknowledge={onAcknowledge}
+                onOpenEvidence={onOpenEvidence}
+                onRefresh={onRefresh}
+                onPatchHotspot={onPatchHotspot}
+                session={session}
+                sessionToken={sessionToken}
+                compact
+              />
+            ))}
 
-        {sorted.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-[#7b8fa1]">
-            No incidents detected. Click <strong className="text-[#1a1f2e]">Seed demo</strong>.
-          </div>
+            {sorted.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-[#7b8fa1]">
+                No incidents detected. Click <strong className="text-[#1a1f2e]">Seed demo</strong>.
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
