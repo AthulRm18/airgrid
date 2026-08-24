@@ -292,7 +292,7 @@ function App() {
     return <LoginPage onLogin={handleLogin} authError={authError} />;
   }
 
-  const isCoordinator = session.role === "coordinator";
+  const showBrics = session.role === "coordinator";
   const showResearch = session.role === "researcher";
   const canReport = session.role === "citizen";
 
