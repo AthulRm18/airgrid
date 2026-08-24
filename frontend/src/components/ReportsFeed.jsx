@@ -18,8 +18,12 @@ export default function ReportsFeed({ refreshToken, reportsBump = 0, pendingRepo
 
   const loadReports = () => {
     fetch("/api/citizen-reports")
-      .then((r) => r.ok ? r.json() : { reports: [] })
-      .then((d) => setReports((d.reports ?? []).slice(0, 8)))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d && Array.isArray(d.reports)) {
+          setReports(d.reports.slice(0, 10));
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   };

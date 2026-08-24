@@ -67,8 +67,9 @@ function App() {
   const checkHealth = useCallback(async () => {
     try {
       const ctrl = new AbortController();
-      setTimeout(() => ctrl.abort(), 4000);
+      const t = setTimeout(() => ctrl.abort(), 15000);
       const res = await fetch("/api/health", { signal: ctrl.signal });
+      clearTimeout(t);
       if (!res.ok) throw new Error();
       healthFails.current = 0;
       setBackendOk(true);
@@ -76,9 +77,9 @@ function App() {
       return true;
     } catch {
       healthFails.current += 1;
-      if (healthFails.current >= 3) {
+      if (healthFails.current >= 5) {
         setBackendOk(false);
-        setError("Backend offline — start it on port 8000");
+        setError("Connecting to live backend…");
       }
       return false;
     }
