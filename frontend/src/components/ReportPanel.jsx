@@ -137,7 +137,7 @@ export default function ReportPanel({
       setVoiceProcessing(true);
       try {
         const ctrl = new AbortController();
-        setTimeout(() => ctrl.abort(), 10000);
+        setTimeout(() => ctrl.abort(), 18000);
         const res = await fetch("/api/voice-transcript", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -206,7 +206,7 @@ export default function ReportPanel({
     }
     if (photo) form.append("file", photo);
 
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    const timeoutId = setTimeout(() => controller.abort(), 45000);
 
     try {
       const headers = sessionToken ? { "X-Session-Token": sessionToken } : undefined;
@@ -223,10 +223,11 @@ export default function ReportPanel({
       setLocationHint("");
       setPhoto(null);
       setVoiceMeta(null);
+      setSubmitError("");
       onReportSubmitted(data);
     } catch (err) {
       if (err.name === "AbortError") {
-        setSubmitError("Timed out — check Gemini/OpenAQ keys or try again");
+        setSubmitError("Request took too long — please try submitting again.");
       } else {
         setSubmitError(err?.message || "Could not submit. Please retry.");
       }
