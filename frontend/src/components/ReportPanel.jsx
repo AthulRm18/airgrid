@@ -421,13 +421,13 @@ export default function ReportPanel({
       </div>
 
       {submitError && <p className="mt-2 text-xs text-[#e0524a]">{submitError}</p>}
-      {lastResult && <ClassificationResult result={lastResult} />}
+      {lastResult && <ClassificationResult result={lastResult} onClear={() => setLastResult(null)} />}
     </div>
   );
 }
 
-/* ── Classification Result Card ── */
-function ClassificationResult({ result }) {
+/* ── Classification Result Card (themed to app design system) ── */
+function ClassificationResult({ result, onClear }) {
   const textAnalysis = result?.text_analysis;
   const photoAnalysis = result?.photo_analysis;
   const analysis = textAnalysis || photoAnalysis || {};
@@ -439,114 +439,133 @@ function ClassificationResult({ result }) {
   const confidence = analysis.visual_confidence ?? analysis.confidence ?? null;
 
   const sevNum = severity === "high" || severity === "severe" ? 1 : severity === "moderate" ? 2 : 3;
-  const sevColors = {
-    1: { bg: "rgba(224,82,74,0.08)", border: "rgba(224,82,74,0.25)", text: "#e0524a", label: "High" },
-    2: { bg: "rgba(232,162,61,0.08)", border: "rgba(232,162,61,0.25)", text: "#e8a23d", label: "Moderate" },
-    3: { bg: "rgba(79,184,172,0.08)", border: "rgba(79,184,172,0.25)", text: "#4fb8ac", label: "Low" },
+  const sevMap = {
+    1: { color: "var(--color-sev-confirmed)", bg: "rgba(224,82,74,0.06)", border: "rgba(224,82,74,0.18)" },
+    2: { color: "var(--color-sev-corroborated)", bg: "rgba(232,162,61,0.06)", border: "rgba(232,162,61,0.18)" },
+    3: { color: "var(--color-clear-500)", bg: "rgba(26,115,232,0.06)", border: "rgba(26,115,232,0.18)" },
   };
-  const sev = sevColors[sevNum] || sevColors[2];
+  const sev = sevMap[sevNum] || sevMap[2];
 
   const eventIcons = {
-    smoke: Flame,
-    industrial: Flame,
-    vehicular: Wind,
-    agricultural_burning: Flame,
-    dust: CloudRain,
-    construction: AlertTriangle,
-    unclear: Eye,
+    smoke: Flame, industrial: Flame, vehicular: Wind,
+    agricultural_burning: Flame, dust: CloudRain,
+    construction: AlertTriangle, unclear: Eye,
   };
   const EventIcon = eventIcons[eventType] || Eye;
 
   return (
     <div className="mt-3 space-y-2 animate-fade-in">
-      {/* Classification header */}
+      {/* Main classification card */}
       <div
-        className="rounded-xl px-3.5 py-3"
+        className="rounded-lg px-3 py-2.5"
         style={{ background: sev.bg, border: `1px solid ${sev.border}` }}
       >
-        <div className="flex items-center gap-2 mb-1.5">
-          <EventIcon size={14} style={{ color: sev.text }} />
-          <span className="text-sm font-bold" style={{ color: sev.text }}>
-            {eventType.replace(/_/g, " ")}
-          </span>
-          <span className="text-xs text-[#7b8fa1]">—</span>
-          <span className="text-xs font-medium" style={{ color: sev.text }}>
-            severity {sevNum}
-          </span>
+        {/* Header row with clear button */}
+        <div className="flex items-start justify-between gap-2 mb-1.5">
+          <div className="flex items-center gap-1.5">
+            <EventIcon size={13} style={{ color: sev.color }} />
+            <span
+              className="text-sm font-semibold"
+              style={{ color: sev.color, fontFamily: "var(--font-display)" }}
+            >
+              {eventType.replace(/_/g, " ")}
+            </span>
+            <span className="text-[10px] text-[#7b8fa1]">—</span>
+            <span className="text-[10px] font-medium" style={{ color: sev.color }}>
+              severity {sevNum}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClear}
+            className="shrink-0 rounded-full p-0.5 text-[#7b8fa1] hover:text-[#1a1f2e] hover:bg-[#dde3ea] transition-colors"
+            title="Dismiss result"
+          >
+            <X size={12} />
+          </button>
         </div>
 
         {description && (
-          <p className="text-xs italic leading-relaxed text-[#314154]">
+          <p className="text-[11px] italic leading-relaxed text-[#314154] mb-2">
             {description}
           </p>
         )}
 
         {/* Haze score bar */}
-        <div className="mt-2.5 flex items-center gap-2">
-          <span className="text-[10px] font-medium text-[#7b8fa1] w-14 shrink-0">Haze</span>
-          <div className="flex-1 h-1.5 rounded-full bg-[#dde3ea] overflow-hidden">
+        <div className="flex items-center gap-2">
+          <span className="text-[9px] font-medium text-[#7b8fa1] w-10 shrink-0">Haze</span>
+          <div className="flex-1 h-1 rounded-full bg-[#dde3ea] overflow-hidden">
             <div
               className="h-full rounded-full transition-all duration-500"
               style={{
                 width: `${Math.round(hazeScore * 100)}%`,
-                background: hazeScore >= 0.7 ? "#e0524a" : hazeScore >= 0.4 ? "#e8a23d" : "#4fb8ac",
+                background: hazeScore >= 0.7 ? "var(--color-sev-confirmed)" : hazeScore >= 0.4 ? "var(--color-sev-corroborated)" : "var(--color-clear-500)",
               }}
             />
           </div>
-          <span className="text-[10px] font-mono font-medium" style={{ color: sev.text }}>
+          <span
+            className="text-[9px] font-medium w-8 text-right"
+            style={{ color: sev.color, fontFamily: "var(--font-mono)" }}
+          >
             {(hazeScore * 100).toFixed(0)}%
           </span>
         </div>
 
         {confidence != null && confidence > 0 && (
           <div className="mt-1 flex items-center gap-2">
-            <span className="text-[10px] font-medium text-[#7b8fa1] w-14 shrink-0">Conf.</span>
-            <div className="flex-1 h-1.5 rounded-full bg-[#dde3ea] overflow-hidden">
+            <span className="text-[9px] font-medium text-[#7b8fa1] w-10 shrink-0">Conf.</span>
+            <div className="flex-1 h-1 rounded-full bg-[#dde3ea] overflow-hidden">
               <div
-                className="h-full rounded-full bg-[#1a73e8] transition-all duration-500"
-                style={{ width: `${Math.round(confidence * 100)}%` }}
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${Math.round(confidence * 100)}%`, background: "var(--color-clear-500)" }}
               />
             </div>
-            <span className="text-[10px] font-mono font-medium text-[#1a73e8]">
+            <span
+              className="text-[9px] font-medium text-[#1a73e8] w-8 text-right"
+              style={{ fontFamily: "var(--font-mono)" }}
+            >
               {(confidence * 100).toFixed(0)}%
             </span>
           </div>
         )}
       </div>
 
-      {/* Photo-specific analysis details */}
+      {/* Photo visual analysis */}
       {photoAnalysis && (
         <div className="rounded-lg border border-[#dde3ea] bg-[#f9fafb] px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-[#7b8fa1] mb-1.5">Visual analysis</p>
-          <div className="grid grid-cols-3 gap-1.5 text-center">
-            <div className={`rounded-md px-1.5 py-1 text-[10px] font-medium ${
-              photoAnalysis.smoke_visible ? "bg-[rgba(224,82,74,0.1)] text-[#e0524a]" : "bg-[#f0f4f9] text-[#7b8fa1]"
-            }`}>
-              {photoAnalysis.smoke_visible ? "✓" : "✗"} Smoke
-            </div>
-            <div className={`rounded-md px-1.5 py-1 text-[10px] font-medium ${
-              photoAnalysis.haze_visible ? "bg-[rgba(232,162,61,0.1)] text-[#e8a23d]" : "bg-[#f0f4f9] text-[#7b8fa1]"
-            }`}>
-              {photoAnalysis.haze_visible ? "✓" : "✗"} Haze
-            </div>
-            <div className={`rounded-md px-1.5 py-1 text-[10px] font-medium ${
-              photoAnalysis.visibility_reduced ? "bg-[rgba(168,112,232,0.1)] text-[#a870e8]" : "bg-[#f0f4f9] text-[#7b8fa1]"
-            }`}>
-              {photoAnalysis.visibility_reduced ? "✓" : "✗"} Low vis.
-            </div>
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-[#7b8fa1] mb-1.5">
+            Visual analysis
+          </p>
+          <div className="grid grid-cols-3 gap-1 text-center">
+            {[
+              { key: "smoke_visible", label: "Smoke", activeColor: "var(--color-sev-confirmed)", activeBg: "rgba(224,82,74,0.08)" },
+              { key: "haze_visible", label: "Haze", activeColor: "var(--color-sev-corroborated)", activeBg: "rgba(232,162,61,0.08)" },
+              { key: "visibility_reduced", label: "Low vis.", activeColor: "var(--color-sev-hidden)", activeBg: "rgba(168,112,232,0.08)" },
+            ].map(({ key, label, activeColor, activeBg }) => (
+              <div
+                key={key}
+                className="rounded px-1.5 py-0.5 text-[9px] font-medium"
+                style={photoAnalysis[key]
+                  ? { color: activeColor, background: activeBg }
+                  : { color: "#7b8fa1", background: "#f0f4f9" }
+                }
+              >
+                {photoAnalysis[key] ? "✓" : "✗"} {label}
+              </div>
+            ))}
           </div>
           {photoAnalysis.possible_source && photoAnalysis.possible_source !== "unclear" && (
-            <p className="mt-1.5 text-[10px] text-[#314154]">
+            <p className="mt-1 text-[9px] text-[#314154]">
               <span className="font-medium text-[#7b8fa1]">Source:</span> {photoAnalysis.possible_source.replace(/_/g, " ")}
             </p>
           )}
         </div>
       )}
 
-      {/* Success message */}
-      <div className="rounded-lg border border-[rgba(26,115,232,0.2)] bg-[rgba(26,115,232,0.06)] px-3 py-2">
-        <p className="flex items-center gap-1.5 text-xs font-medium text-[#1a73e8]">
-          <CheckCircle2 size={12} /> Report submitted — will be reflected on the map within the next pipeline run.
+      {/* Success footer */}
+      <div className="rounded-lg border border-[rgba(26,115,232,0.15)] bg-[rgba(26,115,232,0.04)] px-3 py-1.5">
+        <p className="flex items-center gap-1.5 text-[11px] font-medium text-[#1a73e8]">
+          <CheckCircle2 size={11} /> Report submitted — will be reflected on the map within the next pipeline run.
         </p>
       </div>
     </div>
