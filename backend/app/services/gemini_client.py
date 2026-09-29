@@ -24,15 +24,16 @@ load_dotenv(_BACKEND_ROOT / ".env")
 
 # Primary model can be overridden via GEMINI_MODEL.
 # Prefer models that actually serve for current API keys.
-# Many "gemini-2.5-*" IDs list but return 404; flash-lite-latest is reliable + fast.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-lite-latest")
+# gemini-2.5-flash is the most reliable; flash-lite variants often hit 503.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 MODEL_CANDIDATES = [
     MODEL,
-    "gemini-flash-lite-latest",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-flash-latest",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-2.0-flash",
 ]
 _WORKING_MODEL: str | None = None
 
@@ -43,7 +44,11 @@ def _get_client() -> Optional[genai.Client]:
         key = key.strip().strip('"').strip("'")
     if not key:
         return None
-    return genai.Client(api_key=key)
+    # Disable SDK-level retries so our own fallback loop handles 503s quickly
+    # instead of the tenacity retry hanging for minutes on an overloaded model.
+    from google.genai import types as genai_types
+    http_opts = genai_types.HttpOptions(api_version="v1beta")
+    return genai.Client(api_key=key, http_options=http_opts)
 
 
 def _parse_json(text: str) -> dict:
@@ -54,7 +59,10 @@ def _parse_json(text: str) -> dict:
 
 
 def _generate_with_fallback(client: genai.Client, contents) -> str:
-    """Call Gemini with a short candidate list; cache the first working model."""
+    """Call Gemini with a short candidate list; cache the first working model.
+    Each model gets a 10s window — if the SDK's internal retries block longer,
+    we move to the next candidate immediately."""
+    import concurrent.futures
     global _WORKING_MODEL
     last_error = None
 
@@ -79,17 +87,27 @@ def _generate_with_fallback(client: genai.Client, contents) -> str:
             seen.add(m)
             ordered.append(m)
 
-    for model_name in ordered[:3]:
+    def _try_model(model_name):
+        kwargs = {"model": model_name, "contents": contents}
+        if config is not None:
+            kwargs["config"] = config
+        response = client.models.generate_content(**kwargs)
+        return (response.text or "").strip()
+
+    PER_MODEL_TIMEOUT = 10  # seconds — fail fast, try next candidate
+
+    for model_name in ordered[:5]:
         try:
-            kwargs = {"model": model_name, "contents": contents}
-            if config is not None:
-                kwargs["config"] = config
-            response = client.models.generate_content(**kwargs)
-            text = (response.text or "").strip()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(_try_model, model_name)
+                text = future.result(timeout=PER_MODEL_TIMEOUT)
             if not text:
                 continue
             _WORKING_MODEL = model_name
             return text
+        except concurrent.futures.TimeoutError:
+            last_error = TimeoutError(f"Model {model_name} did not respond within {PER_MODEL_TIMEOUT}s")
+            continue
         except Exception as e:
             last_error = e
             continue

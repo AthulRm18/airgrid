@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2, MapPin } from "lucide-react";
+import { getPlaceName } from "../lib/geocode";
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -70,6 +71,17 @@ export default function ReportsFeed({ refreshToken, reportsBump = 0, pendingRepo
               <p className="mt-0.5 text-xs text-[#314154] line-clamp-2 leading-relaxed">
                 {r.text || r.location_hint || "Photo report"}
               </p>
+              {(r.location_hint || r.lat) && (
+                <p className="mt-0.5 flex items-center gap-1 text-[10px] text-[#7b8fa1]">
+                  <MapPin size={8} className="text-[#1a73e8]" />
+                  reported near {r.location_hint || getPlaceName(r.lat, r.lng)}
+                </p>
+              )}
+              {r._optimistic && (
+                <span className="inline-block mt-1 rounded-full bg-[rgba(232,162,61,0.1)] px-2 py-0.5 text-[9px] font-medium text-[#e8a23d]">
+                  Pending review
+                </span>
+              )}
             </div>
           ))
         )}

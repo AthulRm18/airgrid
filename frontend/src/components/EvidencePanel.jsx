@@ -1,7 +1,7 @@
 /**
  * EvidencePanel — show fused evidence instantly, then enrich with live Gemini.
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   X, Loader2, CheckCircle2, Shield, TrendingUp, Users,
   Wind, AlertTriangle, Clock, MapPin,
@@ -10,6 +10,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ReferenceLine,
 } from "recharts";
+import { getPlaceName } from "../lib/geocode";
 
 export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
   const [full, setFull] = useState(null);
@@ -77,6 +78,11 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
   const data = full ?? hotspot;
   const confidence = Math.round((data?.confidence_score ?? 0) * 100);
   const sev = data?.severity ?? "unknown";
+  const placeName = useMemo(() => {
+    const lat = data?.lat ?? hotspot?.lat;
+    const lng = data?.lng ?? hotspot?.lng;
+    return getPlaceName(lat, lng);
+  }, [data?.lat, data?.lng, hotspot?.lat, hotspot?.lng]);
   const sevColor = {
     confirmed: "var(--color-sev-confirmed)",
     hidden: "var(--color-sev-hidden)",
@@ -96,8 +102,9 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
             <h2 className="font-[family-name:var(--font-display)] text-base font-semibold text-[var(--color-mist-50)]">
               Evidence — {sev.charAt(0).toUpperCase() + sev.slice(1)}
             </h2>
-            <p className="font-[family-name:var(--font-mono)] text-[11px] text-[var(--color-mist-400)]">
-              {h3Cell}
+            <p className="flex items-center gap-1 text-[11px] text-[var(--color-mist-400)]">
+              <MapPin size={10} className="text-[var(--color-clear-500)]" />
+              {placeName}
             </p>
           </div>
           <button onClick={onClose} className="rounded-lg p-1.5 text-[var(--color-mist-400)] hover:text-[var(--color-mist-50)]">
@@ -163,7 +170,10 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
                 <div>
                   <div className="flex items-center justify-between mb-1.5 text-[11px] text-[var(--color-mist-400)]">
                     <span className="font-medium text-[var(--color-mist-200)]">Immediate hotspot cell</span>
-                    <span className="font-mono text-[10px]">{h3Cell ? `${h3Cell.slice(0, 11)}…` : ""}</span>
+                    <span className="flex items-center gap-1 text-[10px]">
+                      <MapPin size={9} className="text-[var(--color-clear-500)]" />
+                      {placeName}
+                    </span>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <Stat label="Population" value={full.impact.population?.toLocaleString()} color="var(--color-prop-near)" />

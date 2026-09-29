@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { CheckCircle2, Loader2, Mic, MicOff, Send, UploadCloud, MapPin, Navigation, X } from "lucide-react";
+import { CheckCircle2, Loader2, Mic, MicOff, Send, UploadCloud, MapPin, Navigation, X, AlertTriangle, Eye, Flame, Wind, CloudRain } from "lucide-react";
 
 // Supported regional languages for voice input
 const VOICE_LANGS = [
@@ -48,6 +48,7 @@ export default function ReportPanel({
   const [text, setText] = useState("");
   const [locationHint, setLocationHint] = useState("");
   const [photo, setPhoto] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
   const [locationIdx, setLocationIdx] = useState(0);
   const [gpsCoords, setGpsCoords] = useState(null);
   const [gettingGps, setGettingGps] = useState(false);
@@ -222,6 +223,7 @@ export default function ReportPanel({
       setText("");
       setLocationHint("");
       setPhoto(null);
+      setPhotoPreview(null);
       setVoiceMeta(null);
       setSubmitError("");
       onReportSubmitted(data);
@@ -374,8 +376,32 @@ export default function ReportPanel({
             {photo ? <span className="text-[#1a73e8]">{photo.name}</span> : "Attach photo"}
           </span>
           <input type="file" accept="image/*" className="hidden"
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)} />
+            onChange={(e) => {
+              const f = e.target.files?.[0] ?? null;
+              setPhoto(f);
+              if (f) {
+                const reader = new FileReader();
+                reader.onload = (ev) => setPhotoPreview(ev.target.result);
+                reader.readAsDataURL(f);
+              } else {
+                setPhotoPreview(null);
+              }
+            }} />
         </label>
+
+        {/* Photo preview */}
+        {photoPreview && (
+          <div className="relative rounded-lg overflow-hidden border border-[#dde3ea] bg-[#f9fafb]">
+            <img src={photoPreview} alt="Preview" className="w-full max-h-[120px] object-cover" />
+            <button
+              type="button"
+              onClick={() => { setPhoto(null); setPhotoPreview(null); }}
+              className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-white/80 text-[#7b8fa1] hover:text-[#e0524a]"
+            >
+              <X size={10} />
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="mt-2 flex items-center justify-end gap-2">
@@ -395,13 +421,134 @@ export default function ReportPanel({
       </div>
 
       {submitError && <p className="mt-2 text-xs text-[#e0524a]">{submitError}</p>}
-      {lastResult && (
-        <div className="mt-2 rounded-lg border border-[rgba(26,115,232,0.2)] bg-[rgba(26,115,232,0.06)] px-3 py-2">
-          <p className="flex items-center gap-1.5 text-xs font-medium text-[#1a73e8]">
-            <CheckCircle2 size={12} /> Report submitted — watch the map zone light up
+      {lastResult && <ClassificationResult result={lastResult} />}
+    </div>
+  );
+}
+
+/* ── Classification Result Card ── */
+function ClassificationResult({ result }) {
+  const textAnalysis = result?.text_analysis;
+  const photoAnalysis = result?.photo_analysis;
+  const analysis = textAnalysis || photoAnalysis || {};
+
+  const eventType = analysis.event_type || analysis.possible_source || "smoke";
+  const severity = analysis.severity || (result.combined_haze_score >= 0.7 ? "high" : result.combined_haze_score >= 0.4 ? "moderate" : "low");
+  const hazeScore = result.combined_haze_score ?? analysis.haze_score ?? 0;
+  const description = analysis.notes || analysis.translated_text || result.text || "";
+  const confidence = analysis.visual_confidence ?? analysis.confidence ?? null;
+
+  const sevNum = severity === "high" || severity === "severe" ? 1 : severity === "moderate" ? 2 : 3;
+  const sevColors = {
+    1: { bg: "rgba(224,82,74,0.08)", border: "rgba(224,82,74,0.25)", text: "#e0524a", label: "High" },
+    2: { bg: "rgba(232,162,61,0.08)", border: "rgba(232,162,61,0.25)", text: "#e8a23d", label: "Moderate" },
+    3: { bg: "rgba(79,184,172,0.08)", border: "rgba(79,184,172,0.25)", text: "#4fb8ac", label: "Low" },
+  };
+  const sev = sevColors[sevNum] || sevColors[2];
+
+  const eventIcons = {
+    smoke: Flame,
+    industrial: Flame,
+    vehicular: Wind,
+    agricultural_burning: Flame,
+    dust: CloudRain,
+    construction: AlertTriangle,
+    unclear: Eye,
+  };
+  const EventIcon = eventIcons[eventType] || Eye;
+
+  return (
+    <div className="mt-3 space-y-2 animate-fade-in">
+      {/* Classification header */}
+      <div
+        className="rounded-xl px-3.5 py-3"
+        style={{ background: sev.bg, border: `1px solid ${sev.border}` }}
+      >
+        <div className="flex items-center gap-2 mb-1.5">
+          <EventIcon size={14} style={{ color: sev.text }} />
+          <span className="text-sm font-bold" style={{ color: sev.text }}>
+            {eventType.replace(/_/g, " ")}
+          </span>
+          <span className="text-xs text-[#7b8fa1]">—</span>
+          <span className="text-xs font-medium" style={{ color: sev.text }}>
+            severity {sevNum}
+          </span>
+        </div>
+
+        {description && (
+          <p className="text-xs italic leading-relaxed text-[#314154]">
+            {description}
           </p>
+        )}
+
+        {/* Haze score bar */}
+        <div className="mt-2.5 flex items-center gap-2">
+          <span className="text-[10px] font-medium text-[#7b8fa1] w-14 shrink-0">Haze</span>
+          <div className="flex-1 h-1.5 rounded-full bg-[#dde3ea] overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{
+                width: `${Math.round(hazeScore * 100)}%`,
+                background: hazeScore >= 0.7 ? "#e0524a" : hazeScore >= 0.4 ? "#e8a23d" : "#4fb8ac",
+              }}
+            />
+          </div>
+          <span className="text-[10px] font-mono font-medium" style={{ color: sev.text }}>
+            {(hazeScore * 100).toFixed(0)}%
+          </span>
+        </div>
+
+        {confidence != null && confidence > 0 && (
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-[10px] font-medium text-[#7b8fa1] w-14 shrink-0">Conf.</span>
+            <div className="flex-1 h-1.5 rounded-full bg-[#dde3ea] overflow-hidden">
+              <div
+                className="h-full rounded-full bg-[#1a73e8] transition-all duration-500"
+                style={{ width: `${Math.round(confidence * 100)}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono font-medium text-[#1a73e8]">
+              {(confidence * 100).toFixed(0)}%
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Photo-specific analysis details */}
+      {photoAnalysis && (
+        <div className="rounded-lg border border-[#dde3ea] bg-[#f9fafb] px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-[#7b8fa1] mb-1.5">Visual analysis</p>
+          <div className="grid grid-cols-3 gap-1.5 text-center">
+            <div className={`rounded-md px-1.5 py-1 text-[10px] font-medium ${
+              photoAnalysis.smoke_visible ? "bg-[rgba(224,82,74,0.1)] text-[#e0524a]" : "bg-[#f0f4f9] text-[#7b8fa1]"
+            }`}>
+              {photoAnalysis.smoke_visible ? "✓" : "✗"} Smoke
+            </div>
+            <div className={`rounded-md px-1.5 py-1 text-[10px] font-medium ${
+              photoAnalysis.haze_visible ? "bg-[rgba(232,162,61,0.1)] text-[#e8a23d]" : "bg-[#f0f4f9] text-[#7b8fa1]"
+            }`}>
+              {photoAnalysis.haze_visible ? "✓" : "✗"} Haze
+            </div>
+            <div className={`rounded-md px-1.5 py-1 text-[10px] font-medium ${
+              photoAnalysis.visibility_reduced ? "bg-[rgba(168,112,232,0.1)] text-[#a870e8]" : "bg-[#f0f4f9] text-[#7b8fa1]"
+            }`}>
+              {photoAnalysis.visibility_reduced ? "✓" : "✗"} Low vis.
+            </div>
+          </div>
+          {photoAnalysis.possible_source && photoAnalysis.possible_source !== "unclear" && (
+            <p className="mt-1.5 text-[10px] text-[#314154]">
+              <span className="font-medium text-[#7b8fa1]">Source:</span> {photoAnalysis.possible_source.replace(/_/g, " ")}
+            </p>
+          )}
         </div>
       )}
+
+      {/* Success message */}
+      <div className="rounded-lg border border-[rgba(26,115,232,0.2)] bg-[rgba(26,115,232,0.06)] px-3 py-2">
+        <p className="flex items-center gap-1.5 text-xs font-medium text-[#1a73e8]">
+          <CheckCircle2 size={12} /> Report submitted — will be reflected on the map within the next pipeline run.
+        </p>
+      </div>
     </div>
   );
 }

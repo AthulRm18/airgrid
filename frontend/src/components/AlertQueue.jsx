@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Bell, CheckCircle2, Eye, Loader2, Shield, TrendingUp, XCircle } from "lucide-react";
+import { Bell, CheckCircle2, Eye, Loader2, MapPin, Shield, TrendingUp, XCircle } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { SEVERITY, SEVERITY_ORDER } from "../lib/severity";
+import { getPlaceName } from "../lib/geocode";
 
 const REGION_FILTERS = [
   { id: "all", label: "All" },
@@ -243,8 +244,9 @@ function AlertRow({ hotspot, index, selected, onSelect, onAcknowledge, onOpenEvi
               </span>
             )}
           </span>
-          <span className="block truncate font-mono text-[10px] text-[#7b8fa1]">
-            {hotspot.h3_cell.slice(0, 14)}…
+          <span className="block truncate text-[10px] text-[#7b8fa1]">
+            <MapPin size={9} className="inline mr-0.5 text-[#1a73e8]" />
+            {getPlaceName(hotspot.lat, hotspot.lng)}
             {hotspot.aqi_estimate != null && ` · ~${Math.round(hotspot.aqi_estimate)} µg/m³`}
             {hotspot.citizen_report_count > 0 && ` · ${hotspot.citizen_report_count} report${hotspot.citizen_report_count > 1 ? "s" : ""}`}
           </span>
