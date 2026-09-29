@@ -313,7 +313,7 @@ export default function ReportPanel({
         )}
         {voiceMeta && !voiceProcessing && (
           <p className="text-[10px] text-[#0d9488]">
-            Voice classified · ready to submit (no second Gemini wait)
+            ✓ Voice classified · ready to submit
           </p>
         )}
 
