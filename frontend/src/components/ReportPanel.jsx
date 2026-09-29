@@ -261,19 +261,36 @@ export default function ReportPanel({
             type="button"
             onClick={recording ? stopVoice : startVoice}
             disabled={voiceProcessing || submitting}
-            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-[#f0f4f9] disabled:opacity-40"
-            title={recording ? "Stop" : "Voice"}
+            className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full disabled:opacity-40 transition-colors ${
+              recording
+                ? "bg-[#e0524a] mic-recording-pulse"
+                : "bg-[#f0f4f9]"
+            }`}
+            title={recording ? "Stop recording" : "Start voice input"}
           >
             {voiceProcessing ? (
               <Loader2 size={12} className="animate-spin text-[#1a73e8]" />
             ) : recording ? (
-              <MicOff size={12} className="text-[#e0524a]" />
+              <MicOff size={12} className="text-white" />
             ) : (
               <Mic size={12} className="text-[#1a73e8]" />
             )}
           </button>
-          {/* Language pill — sits below textarea, above the voice button */}
         </div>
+
+        {/* Listening indicator */}
+        {recording && (
+          <div className="flex items-center gap-2 rounded-lg bg-[rgba(224,82,74,0.06)] border border-[rgba(224,82,74,0.15)] px-3 py-1.5 animate-fade-in">
+            <span className="mic-recording-dot" />
+            <span className="text-[11px] font-medium text-[#e0524a]">Listening…</span>
+            <span className="text-[10px] text-[#7b8fa1]">speak now</span>
+            <div className="ml-auto flex items-center gap-0.5">
+              {[1,2,3,4,5].map((i) => (
+                <span key={i} className="mic-bar" style={{ animationDelay: `${i * 0.1}s` }} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Voice language selector */}
         <div className="flex items-center gap-1.5">

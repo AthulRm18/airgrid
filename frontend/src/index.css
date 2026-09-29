@@ -152,3 +152,38 @@ body {
 ::-webkit-scrollbar-track { background: rgba(216, 224, 235, 0.35); }
 ::-webkit-scrollbar-thumb { background: rgba(95, 111, 134, 0.32); border-radius: 999px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(95, 111, 134, 0.48); }
+
+/* ── Mic recording animations ── */
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 82, 74, 0.45); }
+  50%      { box-shadow: 0 0 0 6px rgba(224, 82, 74, 0); }
+}
+.mic-recording-pulse {
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mic-dot-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+.mic-recording-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-sev-confirmed);
+  animation: mic-dot-blink 1s ease-in-out infinite;
+}
+
+@keyframes mic-bar-bounce {
+  0%, 100% { height: 4px; }
+  50%      { height: 12px; }
+}
+.mic-bar {
+  display: inline-block;
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--color-sev-confirmed);
+  animation: mic-bar-bounce 0.6s ease-in-out infinite;
+}
