@@ -166,9 +166,13 @@ def get_all_citizen_reports() -> list[dict]:
             docs = _db.collection("citizen_reports").order_by(
                 "submitted_at", direction="DESCENDING"
             ).limit(500).stream()
-            return [d.to_dict() for d in docs]
-        except Exception:
-            pass
+            results = [d.to_dict() for d in docs]
+            # Keep fallback store in sync so page refreshes always work
+            if results:
+                _FALLBACK_STORE["citizen_reports"] = results
+            return results
+        except Exception as e:
+            print(f"[Firebase] Firestore read failed, using fallback: {e}")
     return list(_FALLBACK_STORE["citizen_reports"])
 
 
