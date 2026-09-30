@@ -10,7 +10,7 @@
 Official air quality monitoring infrastructure in India and across the Global South is sparse, coarse, and concentrated in affluent metropolitan centers. Millions of citizens living in industrial corridors, peri-urban clusters, and rural agricultural belts breathe hazardous air from localized episodic events—crop residue burning, unpermitted industrial venting, and illegal waste incineration—that never register on distant regulatory monitors.
 
 **AirGrid** bridges this critical surveillance gap. It is an end-to-end community environmental intelligence platform that:
-1. **Empowers Citizens**: Low-barrier, regional-language reporting via voice, photo, and text processed by **Google Gemini 2.5**.
+1. **Empowers Citizens**: Low-barrier, regional-language reporting via voice, photo, and text processed by **Google Gemini 3.8 Flash**.
 2. **Fuses Multi-Modal Signals**: Combines citizen evidence, **Sentinel-5P / Google Earth Engine** satellite aerosol anomalies, and **OpenAQ / CPCB** ground sensors using Uber H3 spatial indexing.
 3. **Discovers Blind-Spot Hotspots**: Statistically separates normal diurnal variation from hidden localized spikes, classifying threats as *Hidden*, *Corroborated*, *Confirmed*, or *Unverified*.
 4. **Predicts Propagation Corridors**: Wind-aware plume modeling forecasts downwind exposure paths and identifies vulnerable community infrastructure (schools, clinics, densely populated colonies) hours before smoke arrives.
@@ -35,7 +35,7 @@ Official air quality monitoring infrastructure in India and across the Global So
                         Bengali, Marathi, Kannada, English)
                                         │
                                         ▼
-                          [ Google Gemini 2.5 Multi-Modal ]
+                          [ Google Gemini 3.8 Flash Multi-Modal ]
                    (Speech Transcription, Translation, Image Severity,
                          Structured Incident Feature Extraction)
                                         │
@@ -72,7 +72,7 @@ Official air quality monitoring infrastructure in India and across the Global So
 
 | Google Technology | Specific Architectural Role | Why It Is Essential |
 | :--- | :--- | :--- |
-| **Gemini 2.5 Flash Lite** | Multi-lingual audio transcription, vernacular translation, and computer vision severity analysis. | Extracts structured pollution parameters from unstructured citizen inputs in 6 Indian languages in < 1.2s. |
+| **Gemini 3.8 Flash** | Multi-lingual audio transcription, vernacular translation, and computer vision severity analysis. | Extracts structured pollution parameters from unstructured citizen inputs in 6 Indian languages in < 1.2s. |
 | **Google Earth Engine (Sentinel-5P)** | Offline & live retrieval of Copernicus Sentinel-5P NRTI absorbing aerosol index. | Provides top-down satellite verification over rural and peri-urban zones where ground sensors are non-existent. |
 | **Firebase Firestore** | Real-time state persistence for incidents, alerts, acknowledgments, and federated event logs. | Guarantees instant synchronization across citizen and authority dashboards with offline local JSON fallback. |
 | **Google Maps Platform / Leaflet** | Geospatial rendering of H3 hexagons, plume propagation vectors, and school/hospital POIs. | Intuitive spatial map with zero camera jitter during background 8-second polling cycles. |
@@ -132,7 +132,7 @@ cp .env.example .env
 Edit `backend/.env`:
 ```env
 GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-flash-lite-latest
+GEMINI_MODEL=gemini-3.8-flash
 OPENAQ_API_KEY=your_openaq_key_or_leave_blank_for_mock_grid
 USE_EARTH_ENGINE=false
 ```
