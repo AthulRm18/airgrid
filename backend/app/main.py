@@ -1091,20 +1091,32 @@ async def seed_demo():
     FEDERATED_EVENTS.clear()
     fb.clear_federated_events()
 
-    # Step 1: Seed citizen reports (fast — skip Gemini with is_demo=True)
+    # Step 1: Seed citizen reports (fast — skip Gemini, batch write to Firebase)
     import importlib
     importlib.reload(demo_scenario)
     demo_reports = demo_scenario.get_demo_reports()
     seeded = []
     for r in demo_reports:
-        report = CitizenReport(
-            lat=r["lat"], lng=r["lng"],
-            text=r["text"], source=r["source"],
-            haze_score=r.get("haze_score"),
-            is_demo=True,
-        )
-        result = await submit_report(report)
-        seeded.append(result)
+        record = {
+            "id": str(uuid.uuid4()),
+            "incident_id": None,
+            "lat": r["lat"],
+            "lng": r["lng"],
+            "h3_cell": latlng_to_cell(r["lat"], r["lng"]),
+            "text": r["text"],
+            "source": r["source"],
+            "haze_score": r.get("haze_score") if r.get("haze_score") is not None else 0.6,
+            "country_code": LOCAL_COUNTRY,
+            "gemini_classification": None,
+            "photo_classification": None,
+            "location_hint": None,
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+            "synced": True,
+            "is_demo": True,
+        }
+        seeded.append(record)
+    # Single batch write instead of 13 individual Firestore roundtrips
+    fb.batch_add_citizen_reports(seeded)
 
     # Step 2: Prime satellite overrides (skip slow full hotspot recalc — frontend will poll)
     for cell, score in demo_scenario.get_demo_satellite_overrides().items():

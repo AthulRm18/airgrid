@@ -143,6 +143,22 @@ def add_citizen_report(record: dict) -> dict:
     return record
 
 
+def batch_add_citizen_reports(records: list[dict]):
+    """Add multiple reports in a single batch — used by demo seed for speed."""
+    _init_firebase()
+    _FALLBACK_STORE["citizen_reports"].extend(records)
+    _persist_state()
+    if _using_firebase and _db:
+        try:
+            batch = _db.batch()
+            for record in records:
+                ref = _db.collection("citizen_reports").document(record["id"])
+                batch.set(ref, record)
+            batch.commit()
+        except Exception as e:
+            print(f"[Firebase] Batch write warning: {e}")
+
+
 def get_all_citizen_reports() -> list[dict]:
     _init_firebase()
     if _using_firebase and _db:
