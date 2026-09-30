@@ -167,14 +167,20 @@ async def _train_forecast_on_startup():
     if persisted:
         FEDERATED_EVENTS.extend(persisted)
 
-    # Auto-seed demo scenario so the dashboard is never empty on first load.
+    # Auto-seed demo scenario ONLY if the database is empty (no existing reports).
+    # This preserves user-submitted reports across server restarts and redeploys.
     if os.environ.get("DEMO_AUTO_SEED", "true").lower() in ("1", "true", "yes"):
-        try:
-            result = await seed_demo()
+        existing = fb.get_all_citizen_reports()
+        if not existing:
+            try:
+                result = await seed_demo()
+                _DEMO_SEEDED = True
+                print(f"[CONFLUX] Demo scenario seeded ({result['seeded']} citizen reports).")
+            except Exception as exc:
+                print(f"[CONFLUX] Demo auto-seed skipped: {exc}")
+        else:
             _DEMO_SEEDED = True
-            print(f"[CONFLUX] Demo scenario seeded ({result['seeded']} citizen reports).")
-        except Exception as exc:
-            print(f"[CONFLUX] Demo auto-seed skipped: {exc}")
+            print(f"[CONFLUX] {len(existing)} reports already in DB — skipping auto-seed to preserve data.")
 
 
 class CitizenReport(BaseModel):
