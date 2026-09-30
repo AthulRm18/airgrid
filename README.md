@@ -3,6 +3,8 @@
 > **Build with AI: Code for Communities — Second Edition (Google / Hack2Skill)**  
 > *Hyperlocal pollution intelligence before exposure: fusing citizen reports, satellite aerosol anomalies, and ground sensors into actionable community defense.*
 
+[![Demo Video](https://img.shields.io/badge/▶_Demo_Video-YouTube-red?style=for-the-badge&logo=youtube)](https://youtu.be/-AMg8rKNaAU)
+
 ---
 
 ## Executive Summary
