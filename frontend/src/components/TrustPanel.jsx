@@ -4,7 +4,7 @@ export default function TrustPanel({ bricsStatus }) {
   const sourceRows = [
     { label: "Ground sensors", value: "OpenAQ · mock fallback", icon: Database },
     { label: "Weather", value: "IMD · mock fallback", icon: Radar },
-    { label: "Gemini AI", value: "Gemini 2.5 Flash", icon: ShieldCheck },
+    { label: "Gemini AI", value: "Gemini 3.8 Flash", icon: ShieldCheck },
     { label: "BRICS exchange", value: "enabled", icon: Globe2 },
   ];
 

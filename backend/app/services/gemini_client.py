@@ -23,17 +23,16 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_BACKEND_ROOT / ".env")
 
 # Primary model can be overridden via GEMINI_MODEL.
-# Prefer models that actually serve for current API keys.
-# gemini-2.5-flash is the most reliable; flash-lite variants often hit 503.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Updated Sep 2026: gemini-3.8-flash is the latest and fastest.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 MODEL_CANDIDATES = [
     MODEL,
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-flash-latest",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
-    "gemini-flash-lite-latest",
-    "gemini-2.0-flash",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
 ]
 _WORKING_MODEL: str | None = None
 
