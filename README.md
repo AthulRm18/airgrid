@@ -63,11 +63,6 @@ Every number on the map comes from **deterministic engines we wrote and tested**
 
 AI proposals are **never auto-published**. Advisory text requires explicit human authorization from a verified authority before broadcast. The advisory generator drafts suggestions; it cannot act.
 
----
-
-## Architecture
-
-```
 ## System Architecture
 
 ```mermaid
@@ -107,9 +102,7 @@ flowchart TD
     H --> I
     H --> J
     H --> K
-
 ```
-
 ### Google Technologies
 
 | Technology | Role | Why Essential |
