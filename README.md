@@ -63,47 +63,46 @@ Every number on the map comes from **deterministic engines we wrote and tested**
 
 AI proposals are **never auto-published**. Advisory text requires explicit human authorization from a verified authority before broadcast. The advisory generator drafts suggestions; it cannot act.
 
----
+## System Architecture
 
-## Architecture
+```mermaid
+flowchart TD
+    A["Citizen Reports<br/>(Voice / Photo / Text in Hindi, Malayalam,<br/>Bengali, Marathi, Kannada, English)"]
 
+    B["Google Gemini 3.8 Flash<br/>(Speech Transcription · Translation · Image Severity ·<br/>Incident Feature Extraction)"]
+
+    C["Sentinel-5P / Earth Engine<br/>(Aerosol Index Anomaly)"]
+
+    D["OpenAQ / CPCB Sensors<br/>(Live Hourly PM2.5 Grid)"]
+
+    E["Spatial H3 Hexagonal Grid<br/>(Resolution 7 & 8)"]
+
+    F["Evidence-Fusion Engine & LightGBM Forecast<br/>• 6-factor weighted confidence scoring<br/>• Z-score anomaly detection vs 14-day baseline<br/>• Wind-aware 12h plume propagation"]
+
+    G["Firebase Firestore<br/>(Real-time sync, offline JSON fallback)"]
+
+    H["Role-Based Workflows"]
+
+    I["Citizen<br/>(Voice/photo reports,<br/>vernacular advisories)"]
+
+    J["Verifier<br/>(Evidence review,<br/>field dispatch)"]
+
+    K["Authority<br/>(Geofenced alerts,<br/>audit trail)"]
+
+    A --> B
+
+    B --> E
+    C --> E
+    D --> E
+
+    E --> F
+    F --> G
+    G --> H
+
+    H --> I
+    H --> J
+    H --> K
 ```
-                              [ Citizen Reports ]
-                  (Voice / Photo / Text in Hindi, Malayalam,
-                    Bengali, Marathi, Kannada, English)
-                                    │
-                                    ▼
-                      [ Google Gemini 3.8 Flash ]
-               (Speech Transcription · Translation · Image
-                Severity · Incident Feature Extraction)
-                                    │
-[ Sentinel-5P / Earth Engine ]      │      [ OpenAQ / CPCB Sensors ]
-   (Aerosol Index Anomaly)          │      (Live Hourly PM2.5 Grid)
-            │                       │                │
-            └───────────────────────┼────────────────┘
-                                    ▼
-                      [ Spatial H3 Hexagonal Grid ]
-                           (Resolution 7 & 8)
-                                    │
-                                    ▼
-               [ Evidence-Fusion Engine & LightGBM Forecast ]
-               - 6-factor weighted confidence scoring
-               - Z-score anomaly detection vs 14-day baseline
-               - Wind-aware 12h plume propagation
-                                    │
-                                    ▼
-                          [ Firebase Firestore ]
-                  (Real-time sync, offline JSON fallback)
-                                    │
-                                    ▼
-                         [ Role-Based Workflows ]
-             ┌──────────────────────┼──────────────────────┐
-             ▼                      ▼                      ▼
-      [ Citizen ]            [ Verifier ]          [ Authority ]
-   (Voice/photo reports,   (Evidence review,    (Geofenced alerts,
-    vernacular advisories)  field dispatch)      audit trail)
-```
-
 ### Google Technologies
 
 | Technology | Role | Why Essential |
@@ -201,4 +200,4 @@ AirGrid is designed as the **intelligence and decision layer** on top of that ex
 
 Built for public good under the MIT License. AirGrid complies with responsible AI guidelines: all AI-generated public advisories require explicit human authorization before broadcast, satellite/sensor data sources are transparently cited in every evidence bundle, and all demo data is clearly labeled as synthetic.
 
-**Team**: Athul R M
+**Team**: Infinite loops
