@@ -93,9 +93,11 @@ def _generate_with_fallback(client: genai.Client, contents) -> str:
         response = client.models.generate_content(**kwargs)
         return (response.text or "").strip()
 
-    PER_MODEL_TIMEOUT = 10  # seconds — fail fast, try next candidate
+    PER_MODEL_TIMEOUT = 5  # seconds — fail fast, try next candidate
 
-    for model_name in ordered[:5]:
+    # If we have a working model, only try 2 candidates max (working + 1 backup)
+    max_candidates = 2 if _WORKING_MODEL else 4
+    for model_name in ordered[:max_candidates]:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                 future = ex.submit(_try_model, model_name)

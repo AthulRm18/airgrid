@@ -130,8 +130,8 @@ _DEMO_SEEDED = False
 _HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
 _EVIDENCE_CACHE: dict[str, dict] = {}
 _OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "20"))
-_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "20"))
-_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "25"))
+_EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "300"))
+_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "15"))
 
 
 @app.on_event("startup")
@@ -189,6 +189,25 @@ async def _train_forecast_on_startup():
             timeout=12.0,
         )
         print("[CONFLUX] Gemini warm-up complete — model ready for requests.")
+
+        # Pre-cache AI evidence for all demo hotspots in background
+        # so judges get instant Gemini analysis when clicking hotspots
+        async def _precache_evidence():
+            try:
+                hotspots = await _get_hotspots_cached(max_age_seconds=60.0)
+                cells = [h["h3_cell"] for h in hotspots.get("hotspots", [])[:6]]
+                for cell in cells:
+                    try:
+                        payload = await _build_evidence_payload(cell)
+                        _EVIDENCE_CACHE[cell] = {"ts": time.time(), "payload": payload}
+                        print(f"[CONFLUX] Pre-cached evidence for {cell[:12]}")
+                    except Exception:
+                        pass
+                print(f"[CONFLUX] Evidence pre-cache complete ({len(cells)} hotspots).")
+            except Exception as exc:
+                print(f"[CONFLUX] Evidence pre-cache skipped: {exc}")
+        asyncio.create_task(_precache_evidence())
+
     except Exception as exc:
         print(f"[CONFLUX] Gemini warm-up skipped: {exc}")
 
