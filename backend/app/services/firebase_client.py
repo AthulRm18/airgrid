@@ -159,6 +159,23 @@ def batch_add_citizen_reports(records: list[dict]):
             print(f"[Firebase] Batch write warning: {e}")
 
 
+def update_citizen_report(report_id: str, updates: dict):
+    """Update specific fields of an existing report (e.g. background Gemini analysis)."""
+    _init_firebase()
+    # Update in-memory fallback store
+    for r in _FALLBACK_STORE["citizen_reports"]:
+        if r.get("id") == report_id:
+            r.update(updates)
+            break
+    _persist_state()
+    # Update in Firestore
+    if _using_firebase and _db:
+        try:
+            _db.collection("citizen_reports").document(report_id).update(updates)
+        except Exception as e:
+            print(f"[Firebase] Update warning for {report_id[:8]}: {e}")
+
+
 def get_all_citizen_reports() -> list[dict]:
     _init_firebase()
     if _using_firebase and _db:

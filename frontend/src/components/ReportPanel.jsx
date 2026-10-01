@@ -504,7 +504,12 @@ function ClassificationResult({ result, onClear }) {
 
         {description && (
           <p className="text-[11px] italic leading-relaxed text-[#314154] mb-2">
-            {description}
+            {description.includes("in progress") ? (
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#e8a23d] animate-pulse" />
+                {description}
+              </span>
+            ) : description}
           </p>
         )}
 

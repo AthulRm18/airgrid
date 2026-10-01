@@ -542,31 +542,43 @@ async def submit_photo_report(
     if country_code not in BRICS_COUNTRIES:
         raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
     image_bytes = await file.read()
+    mime = file.content_type or "image/jpeg"
 
-    # Run Gemini photo analysis in thread pool with timeout — never block or 502
-    try:
-        scoring = await asyncio.wait_for(
-            asyncio.to_thread(gemini_client.score_photo, image_bytes, file.content_type or "image/jpeg"),
-            timeout=15.0,
-        )
-    except (asyncio.TimeoutError, Exception) as e:
-        print(f"[Photo] Gemini scoring timed out or failed ({e}), using default score")
-        scoring = {
-            "smoke_visible": True, "haze_visible": True,
-            "visibility_reduced": True, "possible_source": "unclear",
-            "visual_confidence": 0.0, "haze_score": 0.5,
-            "notes": "Photo analysis timed out — report saved with default severity.",
-        }
+    # Save immediately with default score — never make the user wait for Gemini
+    default_scoring = {
+        "smoke_visible": True, "haze_visible": True,
+        "visibility_reduced": True, "possible_source": "analyzing...",
+        "visual_confidence": 0.0, "haze_score": 0.55,
+        "notes": "Photo received — AI analysis in progress.",
+    }
 
-    return _create_report_record(
-        lat=lat,
-        lng=lng,
-        source="photo",
-        country_code=country_code,
-        haze_score=scoring.get("haze_score", 0.5),
-        photo_classification=scoring,
-        gemini_classification=scoring,
+    record = _create_report_record(
+        lat=lat, lng=lng, source="photo", country_code=country_code,
+        haze_score=0.55,
+        photo_classification=default_scoring,
+        gemini_classification=default_scoring,
     )
+
+    # Fire-and-forget: analyze photo with Gemini in background and update the record
+    async def _background_analyze(report_id: str, img: bytes, mime_type: str):
+        try:
+            scoring = await asyncio.wait_for(
+                asyncio.to_thread(gemini_client.score_photo, img, mime_type),
+                timeout=20.0,
+            )
+            # Update the stored report with real Gemini analysis
+            fb.update_citizen_report(report_id, {
+                "haze_score": scoring.get("haze_score", 0.55),
+                "photo_classification": scoring,
+                "gemini_classification": scoring,
+            })
+            print(f"[Photo] Background analysis complete for {report_id[:8]}: haze={scoring.get('haze_score')}")
+        except Exception as e:
+            print(f"[Photo] Background analysis failed for {report_id[:8]}: {e}")
+
+    asyncio.create_task(_background_analyze(record["id"], image_bytes, mime))
+
+    return record
 
 
 @app.post("/api/incidents/report")
