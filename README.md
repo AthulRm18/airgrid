@@ -30,46 +30,39 @@ Official air quality monitoring infrastructure in India and across the Global So
 
 ---
 
-## High-Level Architecture
+## System Architecture
 
-```
-                                  [ Citizen Reports ]
-                      (Voice / Photo / Text in Hindi, Malayalam,
-                        Bengali, Marathi, Kannada, English)
-                                        │
-                                        ▼
-                          [ Google Gemini 3.8 Flash Multi-Modal ]
-                   (Speech Transcription, Translation, Image Severity,
-                         Structured Incident Feature Extraction)
-                                        │
-[ Sentinel-5P / Earth Engine ]          │          [ OpenAQ / CPCB Sensors ]
-   (Aerosol Index Anomaly)              │          (Live Hourly PM2.5 Grid)
-            │                           │                     │
-            └───────────────────────────┼─────────────────────┘
-                                        ▼
-                          [ Spatial H3 Hexagonal Grid ]
-                               (Resolution 7 & 8)
-                                        │
-                                        ▼
-                       [ Evidence-Fusion Engine & LightGBM ]
-                   - Multi-source weighted confidence scoring
-                   - Baseline anomaly deviation (Z-score)
-                   - Severity: HIDDEN | CORROBORATED | CONFIRMED
-                                        │
-                                        ▼
-                     [ Wind-Aware Propagation & Demographics ]
-                   - Downwind plume trajectory forecasting
-                   - Population at risk & vulnerable facility count
-                                        │
-                                        ▼
-                             [ Role-Based Workflows ]
-             ┌──────────────────────────┼──────────────────────────┐
-             ▼                          ▼                          ▼
-      [ Public Citizen ]         [ City Verifier ]        [ District Authority ]
-      (Advisories, Voice)       (Field Team Dispatch)    (Targeted Broadcasts)
-```
+```mermaid
+flowchart TD
+    A["Citizen Reports<br/>(Voice / Photo / Text in Hindi, Malayalam,<br/>Bengali, Marathi, Kannada, English)"]
 
----
+    B["Google Gemini 3.8 Flash Multi-Modal<br/>(Speech Transcription, Translation, Image Severity,<br/>Structured Incident Feature Extraction)"]
+
+    C["Sentinel-5P / Earth Engine<br/>(Aerosol Index Anomaly)"]
+
+    D["OpenAQ / CPCB Sensors<br/>(Live Hourly PM2.5 Grid)"]
+
+    E["Spatial H3 Hexagonal Grid<br/>(Resolution 7 & 8)"]
+
+    F["Evidence-Fusion Engine & LightGBM<br/>• Multi-source weighted confidence scoring<br/>• Baseline anomaly deviation (Z-score)<br/>• Severity: HIDDEN | CORROBORATED | CONFIRMED"]
+
+    G["Wind-Aware Propagation & Demographics<br/>• Downwind plume trajectory forecasting<br/>• Population at risk & vulnerable facility count"]
+
+    H["Public Citizen<br/>(Advisories, Voice)"]
+    I["City Verifier<br/>(Field Team Dispatch)"]
+    J["District Authority<br/>(Targeted Broadcasts)"]
+
+    A --> B
+    B --> E
+    C --> E
+    D --> E
+    E --> F
+    F --> G
+
+    G --> H
+    G --> I
+    G --> J
+```
 
 ## Google Cloud & Google AI Integrations
 
