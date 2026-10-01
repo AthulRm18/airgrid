@@ -182,6 +182,16 @@ async def _train_forecast_on_startup():
             _DEMO_SEEDED = True
             print(f"[CONFLUX] {len(existing)} reports already in DB — skipping auto-seed to preserve data.")
 
+    # Warm up Gemini so the first user request doesn't timeout on cold start
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(gemini_client.classify_text_report, "ping"),
+            timeout=12.0,
+        )
+        print("[CONFLUX] Gemini warm-up complete — model ready for requests.")
+    except Exception as exc:
+        print(f"[CONFLUX] Gemini warm-up skipped: {exc}")
+
 
 class CitizenReport(BaseModel):
     lat: float
@@ -532,7 +542,22 @@ async def submit_photo_report(
     if country_code not in BRICS_COUNTRIES:
         raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
     image_bytes = await file.read()
-    scoring = gemini_client.score_photo(image_bytes, mime_type=file.content_type or "image/jpeg")
+
+    # Run Gemini photo analysis in thread pool with timeout — never block or 502
+    try:
+        scoring = await asyncio.wait_for(
+            asyncio.to_thread(gemini_client.score_photo, image_bytes, file.content_type or "image/jpeg"),
+            timeout=15.0,
+        )
+    except (asyncio.TimeoutError, Exception) as e:
+        print(f"[Photo] Gemini scoring timed out or failed ({e}), using default score")
+        scoring = {
+            "smoke_visible": True, "haze_visible": True,
+            "visibility_reduced": True, "possible_source": "unclear",
+            "visual_confidence": 0.0, "haze_score": 0.5,
+            "notes": "Photo analysis timed out — report saved with default severity.",
+        }
+
     return _create_report_record(
         lat=lat,
         lng=lng,
