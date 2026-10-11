@@ -21,20 +21,22 @@ from google import genai
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_BACKEND_ROOT / ".env")
 
-# ── Model candidates (real, publicly available models, fastest first) ──────
-# We try them in order; first one that responds is cached as _WORKING_MODEL.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-MODEL_CANDIDATES = [
-    MODEL,
+# ── Known-good model names (verified real Gemini API models) ──────────────
+_KNOWN_MODELS = [
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-1.5-flash",
     "gemini-1.5-flash-8b",
+    "gemini-1.5-pro",
 ]
-# De-dupe while preserving order
+
+_env_model = os.environ.get("GEMINI_MODEL", "").strip()
+MODEL = _env_model if _env_model in _KNOWN_MODELS else "gemini-2.0-flash"
+
+# Candidates: env model first (if valid), then rest of known list
 _seen: set = set()
 _ORDERED_CANDIDATES: list[str] = []
-for _m in MODEL_CANDIDATES:
+for _m in [MODEL] + _KNOWN_MODELS:
     if _m and _m not in _seen:
         _seen.add(_m)
         _ORDERED_CANDIDATES.append(_m)
