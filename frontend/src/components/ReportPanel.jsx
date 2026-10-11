@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from "react";
 import { CheckCircle2, Loader2, Mic, MicOff, Send, UploadCloud, MapPin, Navigation, X, AlertTriangle, Eye, Flame, Wind, CloudRain } from "lucide-react";
 
+import { preparePhoto } from "../lib/photo";
+
 // Supported regional languages for voice input
 const VOICE_LANGS = [
   { label: "हिंदी (Hindi)",      code: "hi-IN" },
@@ -58,9 +60,55 @@ export default function ReportPanel({
   const [recording, setRecording] = useState(false);
   const [voiceProcessing, setVoiceProcessing] = useState(false);
   const [voiceLang, setVoiceLang] = useState("hi-IN");
-  const [voiceMeta, setVoiceMeta] = useState(null);
+  const [voiceMessage, setVoiceMessage] = useState("");
   const recognitionRef = useRef(null);
   const submitAbortRef = useRef(null);
+  const voiceAbortRef = useRef(null);
+
+  useEffect(() => () => {
+    recognitionRef.current?.abort();
+    submitAbortRef.current?.abort();
+    voiceAbortRef.current?.abort();
+  }, []);
+
+  // Submission is already saved. Poll analysis without submitting a duplicate.
+  useEffect(() => {
+    if (lastResult?.analysis_status !== "pending") return;
+    const ctrl = new AbortController();
+    let timer;
+    const started = Date.now();
+    async function poll() {
+      try {
+        const res = await fetch(`/api/incidents/${lastResult.incident_id}`, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(res.status);
+        const result = await res.json();
+        if (ctrl.signal.aborted) return;
+        if (result.analysis_status !== "pending") {
+          setLastResult(result);
+          return;
+        }
+      } catch {
+        if (ctrl.signal.aborted) return;
+      }
+      if (Date.now() - started < 18000) {
+        timer = setTimeout(poll, 700);
+      } else {
+        setLastResult((current) => current?.incident_id === lastResult.incident_id
+          ? { ...current, analysis_status: "unavailable" } : current);
+      }
+    }
+    const deadline = setTimeout(() => {
+      ctrl.abort();
+      setLastResult((current) => current?.incident_id === lastResult.incident_id
+        ? { ...current, analysis_status: "unavailable" } : current);
+    }, 20000);
+    timer = setTimeout(poll, 300);
+    return () => {
+      ctrl.abort();
+      clearTimeout(timer);
+      clearTimeout(deadline);
+    };
+  }, [lastResult?.incident_id, lastResult?.analysis_status]);
 
   // Sync dropdown when activeRegion changes (e.g. from map city click)
   useEffect(() => {
@@ -86,8 +134,8 @@ export default function ReportPanel({
 
   const coords = gpsCoords || LOCATIONS[locationIdx] || LOCATIONS[0];
   const canSubmit = useMemo(
-    () => Boolean(text.trim() || photo) && !submitting && !recording,
-    [text, photo, submitting, recording],
+    () => Boolean(text.trim() || photo) && !submitting && !recording && !voiceProcessing,
+    [text, photo, submitting, recording, voiceProcessing],
   );
 
   function handleUseGps() {
@@ -136,9 +184,12 @@ export default function ReportPanel({
       setText(transcript);
       setLastResult(null);
       setVoiceProcessing(true);
+      setVoiceMessage("");
+      voiceAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      voiceAbortRef.current = ctrl;
+      const timeout = setTimeout(() => ctrl.abort(), 12000);
       try {
-        const ctrl = new AbortController();
-        setTimeout(() => ctrl.abort(), 18000);
         const res = await fetch("/api/voice-transcript", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -148,18 +199,19 @@ export default function ReportPanel({
         if (res.ok) {
           const data = await res.json();
           setText(data.translated || transcript);
-          setVoiceMeta({
-            haze_score: data.haze_score,
-            event_type: data.event_type,
-            severity: data.severity,
-          });
+          setVoiceMessage(data.analysis_status === "live"
+            ? "Voice report analyzed — ready to submit."
+            : "Transcript captured. AI translation is unavailable; you can still submit it.");
           if (data.extracted_location_hint) {
             setLocationHint(data.extracted_location_hint);
           }
+        } else {
+          throw new Error(res.status);
         }
       } catch {
-        setVoiceMeta(null);
+        setVoiceMessage("Transcript captured. AI translation is unavailable; you can still submit it.");
       } finally {
+        clearTimeout(timeout);
         setVoiceProcessing(false);
       }
     };
@@ -178,7 +230,7 @@ export default function ReportPanel({
   function cancelSubmit() {
     submitAbortRef.current?.abort();
     setSubmitting(false);
-    setSubmitError("Submit cancelled — try again");
+    setSubmitError("Request cancelled — check recent reports before submitting again.");
   }
 
   async function submitIncident() {
@@ -200,16 +252,11 @@ export default function ReportPanel({
     form.append("text", submittedText);
     form.append("location_hint", locationHint.trim() || coords.label);
     form.append("country_code", session?.country_code || "IN");
-    // Reuse voice Gemini result so submit doesn't wait on a second Gemini call
-    if (voiceMeta?.haze_score != null) {
-      form.append("haze_score", String(voiceMeta.haze_score));
-      form.append("skip_gemini", "true");
-    }
-    if (photo) form.append("file", photo);
-
-    const timeoutId = setTimeout(() => controller.abort(), 45000);
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
 
     try {
+      if (photo) form.append("file", await preparePhoto(photo));
+      if (controller.signal.aborted) throw new DOMException("Cancelled", "AbortError");
       const headers = sessionToken ? { "X-Session-Token": sessionToken } : undefined;
       const res = await fetch("/api/incidents/report", {
         method: "POST", body: form, headers, signal: controller.signal,
@@ -224,12 +271,12 @@ export default function ReportPanel({
       setLocationHint("");
       setPhoto(null);
       setPhotoPreview(null);
-      setVoiceMeta(null);
+      setVoiceMessage("");
       setSubmitError("");
       onReportSubmitted(data);
     } catch (err) {
       if (err.name === "AbortError") {
-        setSubmitError("Request took too long — please try submitting again.");
+        setSubmitError("Connection timed out. Check recent reports before submitting again.");
       } else {
         setSubmitError(err?.message || "Could not submit. Please retry.");
       }
@@ -249,7 +296,7 @@ export default function ReportPanel({
             value={text}
             onChange={(e) => {
               setText(e.target.value);
-              setVoiceMeta(null);
+              setVoiceMessage("");
               if (lastResult) setLastResult(null);
               if (submitError) setSubmitError("");
             }}
@@ -310,11 +357,6 @@ export default function ReportPanel({
 
         {voiceProcessing && (
           <p className="text-[10px] text-[#1a73e8]">Translating with Gemini…</p>
-        )}
-        {voiceMeta && !voiceProcessing && (
-          <p className="text-[10px] text-[#0d9488]">
-            ✓ Voice classified · ready to submit
-          </p>
         )}
 
         <div className="flex items-center gap-1.5">
@@ -437,6 +479,7 @@ export default function ReportPanel({
         </button>
       </div>
 
+      {voiceMessage && <p className="mt-2 text-xs text-[#7b8fa1]">{voiceMessage}</p>}
       {submitError && <p className="mt-2 text-xs text-[#e0524a]">{submitError}</p>}
       {lastResult && <ClassificationResult result={lastResult} onClear={() => setLastResult(null)} />}
     </div>
@@ -447,12 +490,17 @@ export default function ReportPanel({
 function ClassificationResult({ result, onClear }) {
   const textAnalysis = result?.text_analysis;
   const photoAnalysis = result?.photo_analysis;
-  const analysis = textAnalysis || photoAnalysis || {};
+  const pending = result.analysis_status === "pending";
+  const analysis = [textAnalysis, photoAnalysis].find((a) => a?.analysis_status === "live") || textAnalysis || photoAnalysis || {};
+  const assessed = analysis.analysis_status === "live";
+  const photoAssessed = photoAnalysis?.analysis_status === "live";
 
-  const eventType = analysis.event_type || analysis.possible_source || "smoke";
+  const eventType = assessed ? (analysis.event_type || analysis.possible_source || "unclear") : pending ? "Analyzing report" : "Unassessed report";
   const severity = analysis.severity || (result.combined_haze_score >= 0.7 ? "high" : result.combined_haze_score >= 0.4 ? "moderate" : "low");
   const hazeScore = result.combined_haze_score ?? analysis.haze_score ?? 0;
-  const description = analysis.notes || analysis.translated_text || result.text || "";
+  const description = pending ? "Report saved — Gemini is analyzing it." : assessed
+    ? (analysis.notes || analysis.translated_text || result.text || "")
+    : "Report saved. AI assessment is unavailable; no pollution conditions were inferred.";
   const confidence = analysis.visual_confidence ?? analysis.confidence ?? null;
 
   const sevNum = severity === "high" || severity === "severe" ? 1 : severity === "moderate" ? 2 : 3;
@@ -489,7 +537,7 @@ function ClassificationResult({ result, onClear }) {
             </span>
             <span className="text-[10px] text-[#7b8fa1]">—</span>
             <span className="text-[10px] font-medium" style={{ color: sev.color }}>
-              severity {sevNum}
+              {assessed ? `severity ${sevNum}` : pending ? "Analyzing…" : "AI unavailable"}
             </span>
           </div>
           <button
@@ -514,7 +562,7 @@ function ClassificationResult({ result, onClear }) {
         )}
 
         {/* Haze score bar */}
-        <div className="flex items-center gap-2">
+        {assessed && <div className="flex items-center gap-2">
           <span className="text-[9px] font-medium text-[#7b8fa1] w-10 shrink-0">Haze</span>
           <div className="flex-1 h-1 rounded-full bg-[#dde3ea] overflow-hidden">
             <div
@@ -531,9 +579,9 @@ function ClassificationResult({ result, onClear }) {
           >
             {(hazeScore * 100).toFixed(0)}%
           </span>
-        </div>
+        </div>}
 
-        {confidence != null && confidence > 0 && (
+        {assessed && confidence != null && confidence > 0 && (
           <div className="mt-1 flex items-center gap-2">
             <span className="text-[9px] font-medium text-[#7b8fa1] w-10 shrink-0">Conf.</span>
             <div className="flex-1 h-1 rounded-full bg-[#dde3ea] overflow-hidden">
@@ -567,16 +615,16 @@ function ClassificationResult({ result, onClear }) {
               <div
                 key={key}
                 className="rounded px-1.5 py-0.5 text-[9px] font-medium"
-                style={photoAnalysis[key]
+                style={photoAssessed && photoAnalysis[key]
                   ? { color: activeColor, background: activeBg }
                   : { color: "#7b8fa1", background: "#f0f4f9" }
                 }
               >
-                {photoAnalysis[key] ? "✓" : "✗"} {label}
+                {photoAssessed ? (photoAnalysis[key] ? "✓" : "✗") : "?"} {label}
               </div>
             ))}
           </div>
-          {photoAnalysis.possible_source && photoAnalysis.possible_source !== "unclear" && (
+          {photoAssessed && photoAnalysis.possible_source && photoAnalysis.possible_source !== "unclear" && (
             <p className="mt-1 text-[9px] text-[#314154]">
               <span className="font-medium text-[#7b8fa1]">Source:</span> {photoAnalysis.possible_source.replace(/_/g, " ")}
             </p>
@@ -587,7 +635,7 @@ function ClassificationResult({ result, onClear }) {
       {/* Success footer */}
       <div className="rounded-lg border border-[rgba(26,115,232,0.15)] bg-[rgba(26,115,232,0.04)] px-3 py-1.5">
         <p className="flex items-center gap-1.5 text-[11px] font-medium text-[#1a73e8]">
-          <CheckCircle2 size={11} /> Report submitted — will be reflected on the map within the next pipeline run.
+          <CheckCircle2 size={11} /> Report saved — visible on the map after its next update.
         </p>
       </div>
     </div>

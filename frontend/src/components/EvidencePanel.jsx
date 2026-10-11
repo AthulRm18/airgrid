@@ -17,63 +17,63 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
   const [aiLoading, setAiLoading] = useState(true);
   const [aiLive, setAiLive] = useState(false);
   const [aiError, setAiError] = useState(false);
+  const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     if (!h3Cell) return;
     let cancelled = false;
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 16000);
     setFull(null);
     setAiLoading(true);
     setAiLive(false);
     setAiError(false);
 
-    // Phase 1: instant fused evidence (no Gemini wait)
-    fetch(`/api/hotspots/${h3Cell}/evidence?fast=true`)
-      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then((data) => {
-        if (!cancelled) {
-          setFull(data);
-          setAiLoading(false);
+    // Sequence the responses so a late fast response cannot replace live AI.
+    async function load() {
+      const fetchEvidence = async (fast) => {
+        const res = await fetch(`/api/hotspots/${h3Cell}/evidence${fast ? "?fast=true" : ""}`, { signal: ctrl.signal });
+        if (!res.ok) throw new Error(res.status);
+        return res.json();
+      };
+      try {
+        let initial;
+        try {
+          initial = await fetchEvidence(true);
+          if (cancelled) return;
+          setFull(initial);
+        } catch (error) {
+          if (error.name === "AbortError") throw error;
+          // A transient fast request failure must not prevent the live request.
         }
-      })
-      .catch(() => {
-        if (!cancelled) setAiLoading(false);
-      });
-
-    // Phase 2: live Gemini enrichment (may take a few seconds)
-    const ctrl = new AbortController();
-    const timeout = setTimeout(() => ctrl.abort(), 35000); // backend has up to 25 s; give it headroom
-    fetch(`/api/hotspots/${h3Cell}/evidence`, { signal: ctrl.signal })
-      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
-      .then((data) => {
+        if (initial?.ai_analysis?.status === "live") {
+          setAiLive(true);
+          return;
+        }
+        if (initial?.ai_analysis?.reason === "missing_api_key") {
+          setAiError(true);
+          return;
+        }
+        const data = await fetchEvidence(false);
         if (cancelled) return;
         setFull(data);
-        // aiLive = backend actually ran Gemini (not just the fast-mode fallback)
-        const note = String(data?.incident_explanation?.confidence_note || "").toLowerCase();
-        const isGeminiLive = (
-          !note.includes("fast_mode") &&
-          !note.includes("missing_api_key") &&
-          !note.includes("gemini_timeout") &&
-          !note.includes("gemini_error")
-        );
-        setAiLive(isGeminiLive);
-        setAiError(false);
-      })
-      .catch(() => {
+        const live = data.ai_analysis?.status === "live";
+        setAiLive(live);
+        setAiError(!live);
+      } catch {
         if (!cancelled) setAiError(true);
-      })
-      .finally(() => {
+      } finally {
         clearTimeout(timeout);
         if (!cancelled) setAiLoading(false);
-      });
-
+      }
+    }
+    load();
     return () => {
       cancelled = true;
       clearTimeout(timeout);
       ctrl.abort();
     };
-  }, [h3Cell]);
-
-  if (!h3Cell) return null;
+  }, [h3Cell, retry]);
 
   const data = full ?? hotspot;
   const confidence = Math.round((data?.confidence_score ?? 0) * 100);
@@ -83,6 +83,8 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
     const lng = data?.lng ?? hotspot?.lng;
     return getPlaceName(lat, lng);
   }, [data?.lat, data?.lng, hotspot?.lat, hotspot?.lng]);
+  if (!h3Cell) return null;
+
   const sevColor = {
     confirmed: "var(--color-sev-confirmed)",
     hidden: "var(--color-sev-hidden)",
@@ -242,9 +244,12 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
                   <Loader2 size={11} className="animate-spin" /> Gemini…
                 </span>
               )}
+              {!aiLoading && !aiLive && (
+                <span className="text-[10px] text-[var(--color-mist-400)]">Fused summary</span>
+              )}
               {!aiLoading && aiLive && (
                 <span className="rounded-full bg-[rgba(26,115,232,0.12)] px-2 py-0.5 text-[10px] font-medium text-[#1a73e8]">
-                  Gemini live
+                  {full?.ai_analysis?.cached ? "Gemini · cached" : "Gemini live"}
                 </span>
               )}
             </div>
@@ -267,7 +272,11 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
                   </ul>
                 )}
                 {aiError && (
-                  <p className="text-[10px] text-[var(--color-mist-400)]">Live Gemini timed out — showing fused summary.</p>
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--color-mist-400)]">
+                    <p>Live AI is unavailable. The evidence summary remains available.</p>
+                    <button type="button" disabled={aiLoading} onClick={() => setRetry((n) => n + 1)}
+                      className="shrink-0 text-[var(--color-clear-500)] disabled:opacity-50">Retry AI</button>
+                  </div>
                 )}
               </div>
             ) : hotspot?.explanation ? (
@@ -278,7 +287,7 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
                 <div className="h-3 w-full animate-pulse rounded bg-[var(--color-ink-700)]" />
               </div>
             ) : (
-              <p className="text-xs text-[var(--color-mist-400)]">Analysis unavailable — check GEMINI_API_KEY.</p>
+              <p className="text-xs text-[var(--color-mist-400)]">Live AI is unavailable. Please retry in a moment.</p>
             )}
           </div>
 
