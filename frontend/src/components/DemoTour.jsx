@@ -308,7 +308,7 @@ export default function DemoTour({ onClose }) {
 
           {/* Quick start */}
           <div className="rounded-xl p-4" style={{ background: "rgba(79,184,172,0.06)", border: "1px solid rgba(79,184,172,0.2)" }}>
-            <p className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: CLR.citizen }}>Quick start for judges</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest mb-2" style={{ color: CLR.citizen }}>Quick start</p>
             <ol className="space-y-1">
               {[
                 "Click Seed demo (top right) to populate 5 Indian regions with realistic reports",
@@ -330,7 +330,7 @@ export default function DemoTour({ onClose }) {
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-[#dde3ea] shrink-0 flex items-center justify-between">
-          <p className="text-[10px] text-[#7b8fa1]">AirGrid · Build with AI: Code for Communities</p>
+          <p className="text-[10px] text-[#7b8fa1]">AirGrid · Community Environmental Intelligence</p>
           <button
             onClick={onClose}
             className="rounded-full px-4 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
