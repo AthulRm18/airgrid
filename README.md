@@ -21,6 +21,9 @@ The data to detect these events already exists across three separate systems: ci
 ## What AirGrid Does
 
 One continuous loop: **Observe → Fuse → Classify → Forecast → Alert → Verify → Act.**
+<img width="1235" height="764" alt="image" src="https://github.com/user-attachments/assets/06a027a7-3568-4c9a-be9d-2bd27fabe3dd" />
+
+
 
 | Capability | How It Works |
 | :--- | :--- |
