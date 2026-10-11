@@ -21,19 +21,21 @@ from google import genai
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_BACKEND_ROOT / ".env")
 
-# ── Known-good model names (verified real Gemini API models) ──────────────
+# ── Known-good model names (verified from Google API response Oct 2026) ────
 _KNOWN_MODELS = [
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-pro",
+    "gemini-3.8-flash",        # Current recommended (Oct 2026)
+    "gemini-2.5-flash",        # Previous gen
+    "gemini-2.0-flash",        # May be deprecated in some regions
+    "gemini-1.5-flash",        # Stable fallback
+    "gemini-1.5-flash-8b",     # Lightweight fallback
+    "gemini-1.5-pro",          # High quality fallback
 ]
 
 _env_model = os.environ.get("GEMINI_MODEL", "").strip()
-MODEL = _env_model if _env_model in _KNOWN_MODELS else "gemini-2.0-flash"
+# Accept any non-empty env model (Google may add more models anytime)
+MODEL = _env_model if _env_model else "gemini-3.8-flash"
 
-# Candidates: env model first (if valid), then rest of known list
+# Candidates: env model first, then rest of known list
 _seen: set = set()
 _ORDERED_CANDIDATES: list[str] = []
 for _m in [MODEL] + _KNOWN_MODELS:
