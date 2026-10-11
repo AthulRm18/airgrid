@@ -224,16 +224,44 @@ def add_incident(record: dict) -> dict:
     return record
 
 
+def get_incident(incident_id: str) -> dict | None:
+    _init_firebase()
+    for incident in _FALLBACK_STORE["incidents"]:
+        if incident.get("incident_id") == incident_id:
+            return incident
+    if _using_firebase and _db:
+        try:
+            doc = _db.collection("incidents").document(incident_id).get()
+            if doc.exists:
+                return doc.to_dict()
+        except Exception:
+            pass
+    return None
+
+
 def get_all_incidents() -> list[dict]:
     _init_firebase()
     if _using_firebase and _db:
         try:
-            docs = _db.collection("incidents").order_by(
-                "submitted_at", direction="DESCENDING"
-            ).limit(200).stream()
-            return [d.to_dict() for d in docs]
+            from google.cloud import firestore as g_firestore
+            direction = g_firestore.Query.DESCENDING
         except Exception:
-            pass
+            direction = "DESCENDING"
+        try:
+            docs = _db.collection("incidents").order_by(
+                "submitted_at", direction=direction
+            ).limit(200).stream()
+            results = [d.to_dict() for d in docs]
+            if results:
+                return results
+        except Exception:
+            try:
+                docs = _db.collection("incidents").limit(200).stream()
+                results = [d.to_dict() for d in docs]
+                if results:
+                    return results
+            except Exception:
+                pass
     return list(_FALLBACK_STORE["incidents"])
 
 

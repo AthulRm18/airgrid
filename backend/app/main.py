@@ -671,7 +671,11 @@ async def submit_incident(
 
 @app.get("/api/incidents/{incident_id}")
 async def get_incident(incident_id: str):
-    incident = next((i for i in fb.get_all_incidents() if i.get("incident_id") == incident_id), None)
+    incident = next((i for i in INCIDENTS if i.get("incident_id") == incident_id), None)
+    if incident is None:
+        incident = fb.get_incident(incident_id)
+    if incident is None:
+        incident = next((i for i in fb.get_all_incidents() if i.get("incident_id") == incident_id), None)
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
     return incident
@@ -1433,11 +1437,23 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
         recommendation = gemini_client._mock_recommendation(rec_data, reason)
         ai_analysis = {"status": "pending" if gemini_client.is_configured() else "unavailable", "reason": reason}
     else:
-        analysis = await gemini_client.analyze_evidence(rec_data)
-        incident_explanation = analysis["incident_explanation"]
-        recommendation = analysis["recommendation"]
-        ai_analysis = {"status": analysis["analysis_status"], "reason": analysis["analysis_reason"],
-            "model": analysis.get("analysis_model"), "cached": analysis.get("analysis_cached", False)}
+        try:
+            analysis = await gemini_client.analyze_evidence(rec_data)
+            incident_explanation = analysis["incident_explanation"]
+            recommendation = analysis["recommendation"]
+            status = analysis.get("analysis_status") or analysis.get("status") or "live"
+            reason = analysis.get("analysis_reason")
+            ai_analysis = {
+                "status": status,
+                "reason": reason,
+                "model": analysis.get("analysis_model"),
+                "cached": analysis.get("analysis_cached", False),
+            }
+        except Exception as e:
+            reason = f"error: {str(e)[:60]}"
+            incident_explanation = gemini_client._mock_incident_explanation(explanation_data, reason)
+            recommendation = gemini_client._mock_recommendation(rec_data, reason)
+            ai_analysis = {"status": "unavailable", "reason": reason}
     if incident_explanation.get("analysis_source") == "fused_evidence" and match.get("explanation"):
         incident_explanation["summary"] = match["explanation"]
 
