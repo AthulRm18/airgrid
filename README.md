@@ -27,7 +27,7 @@ One continuous loop: **Observe → Fuse → Classify → Forecast → Alert → 
 
 | Capability | How It Works |
 | :--- | :--- |
-| 🎙️ **Multi-lingual citizen reporting** | Voice, photo, and text in **Hindi, Bengali, Kannada, Marathi, Malayalam, English**. Gemini 2.0 Flash transcribes regional audio, classifies pollution type, extracts severity and location hints — all in < 1.2s. A citizen who cannot read an AQI dashboard can hold a button and describe what they see. |
+| 🎙️ **Multi-lingual citizen reporting** | Voice, photo, and text in **Hindi, Bengali, Kannada, Marathi, Malayalam, English**. Gemini 3.8 Flash transcribes regional audio, classifies pollution type, extracts severity and location hints — all in < 1.2s. A citizen who cannot read an AQI dashboard can hold a button and describe what they see. |
 | 🛰️ **Satellite aerosol fusion** | Sentinel-5P NRTI absorbing aerosol index pulled via **Google Earth Engine**. Provides top-down verification over areas where ground sensors are non-existent — the satellite sees what no monitor can. |
 | 📡 **Ground sensor integration** | Live hourly PM2.5 from **OpenAQ / CPCB** stations. Where sensors exist, they anchor the confidence score; where they don't, their absence itself becomes signal (coverage uncertainty). |
 | 🔬 **Evidence-fusion hotspot engine** | Six-factor weighted confidence scoring over Uber H3 hexagons (satellite 0.32 · citizen 0.24 · historical deviation 0.16 · sensor 0.12 · weather 0.10 · coverage uncertainty 0.06). Separates diurnal variation from real spikes using Z-score anomaly detection against 14-day baselines. |
@@ -72,7 +72,7 @@ AI proposals are **never auto-published**. Advisory text requires explicit human
 flowchart TD
     A["Citizen Reports<br/>(Voice / Photo / Text in Hindi, Malayalam,<br/>Bengali, Marathi, Kannada, English)"]
 
-    B["Google Gemini 2.0 Flash<br/>(Speech Transcription · Translation · Image Severity ·<br/>Incident Feature Extraction)"]
+    B["Google Gemini 3.8 Flash<br/>(Speech Transcription · Translation · Image Severity ·<br/>Incident Feature Extraction)"]
 
     C["Sentinel-5P / Earth Engine<br/>(Aerosol Index Anomaly)"]
 
@@ -110,7 +110,7 @@ flowchart TD
 
 | Technology | Role | Why Essential |
 | :--- | :--- | :--- |
-| **Gemini 2.0 Flash** | Multi-lingual audio transcription, translation, photo severity scoring, evidence summarization | Processes unstructured citizen inputs in 6 Indian languages into structured pollution parameters in < 1.2s |
+| **Gemini 3.8 Flash** | Multi-lingual audio transcription, translation, photo severity scoring, evidence summarization | Processes unstructured citizen inputs in 6 Indian languages into structured pollution parameters in < 1.2s |
 | **Google Earth Engine** | Sentinel-5P NRTI aerosol index retrieval | Satellite verification over sensor-free zones — the only top-down signal for rural/peri-urban areas |
 | **Firebase Firestore** | Real-time state persistence (incidents, alerts, acknowledgments, federation events) | Instant sync across citizen and authority dashboards with offline local JSON fallback |
 | **Google Maps / Leaflet** | H3 hex rendering, plume vectors, school/hospital POIs | Spatial command center with zero-jitter background polling |
@@ -163,7 +163,7 @@ npm run dev
 | Variable | Required | Description |
 | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | ✅ | Google AI Studio API key |
-| `GEMINI_MODEL` | — | Default: `gemini-2.0-flash` |
+| `GEMINI_MODEL` | — | Default: `gemini-3.8-flash` |
 | `OPENAQ_API_KEY` | — | OpenAQ v3 key (falls back to mock grid) |
 | `USE_EARTH_ENGINE` | — | `true` to enable Sentinel-5P integration |
 | `FIREBASE_CREDENTIALS` | — | Path to service account JSON for Firestore |
