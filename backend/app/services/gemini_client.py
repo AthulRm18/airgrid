@@ -242,25 +242,17 @@ Incident data: {data}"""
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
-def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+async def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
+    import asyncio, base64
     client = _get_client()
     if client is None:
-        return {
-            "smoke_visible": True, "haze_visible": True,
-            "visibility_reduced": True, "possible_source": "unclear",
-            "visual_confidence": 0.0, "haze_score": 0.6,
-            "notes": "GEMINI_API_KEY not set — placeholder score.",
-        }
+        return unavailable_photo("missing_api_key")
     try:
-        import base64
         img_b64 = base64.b64encode(image_bytes).decode()
-        text = _generate_with_fallback(
-            client,
-            [{"inline_data": {"mime_type": mime_type, "data": img_b64}}, PHOTO_PROMPT],
-            timeout=12.0,
-        )
+        contents = [{"inline_data": {"mime_type": mime_type, "data": img_b64}}, PHOTO_PROMPT]
+        text = await asyncio.to_thread(_generate_with_fallback, client, contents, 12.0)
         return _parse_json(text)
-    except Exception as e:
+    except Exception:
         return {
             "smoke_visible": True, "haze_visible": True,
             "visibility_reduced": True, "possible_source": "unclear",
@@ -269,34 +261,25 @@ def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         }
 
 
-def classify_text_report(report_text: str, lang_hint: str = "auto") -> dict:
+async def classify_text_report(report_text: str, lang_hint: str = "auto") -> dict:
+    import asyncio
     client = _get_client()
     if client is None:
-        return {
-            "translated_text": report_text, "detected_language": "unknown",
-            "event_type": "unclear", "severity": "moderate",
-            "possible_source": "unclear",
-            "haze_score": 0.5, "reported_symptoms": [],
-            "extracted_location_hint": None, "confidence": 0.0,
-        }
+        return unavailable_text(report_text, reason="missing_api_key")
     try:
         prompt = TEXT_PROMPT_TEMPLATE.format(
             report_text=report_text,
             lang_hint=lang_hint or "auto",
         )
-        text = _generate_with_fallback(client, prompt, timeout=12.0)
+        text = await asyncio.to_thread(_generate_with_fallback, client, prompt, 12.0)
         return _parse_json(text)
-    except Exception as e:
-        # Best-effort: still save the report with the original text
+    except Exception:
         return {
             "translated_text": report_text,
             "detected_language": lang_hint or "unknown",
-            "event_type": "smoke",
-            "severity": "moderate",
-            "possible_source": "unclear",
-            "haze_score": 0.5,
-            "reported_symptoms": [],
-            "extracted_location_hint": None,
+            "event_type": "smoke", "severity": "moderate",
+            "possible_source": "unclear", "haze_score": 0.5,
+            "reported_symptoms": [], "extracted_location_hint": None,
             "confidence": 0.3,
         }
 
@@ -333,8 +316,9 @@ def generate_structured_recommendation(cell_data: dict) -> dict:
         return _mock_recommendation(cell_data, fallback_reason=f"gemini_error: {str(e)[:80]}")
 
 
-def generate_authority_recommendation(cell_summary: dict) -> str:
+async def generate_authority_recommendation(cell_summary: dict) -> str:
     """Kept for backward compatibility."""
+    import asyncio
     client = _get_client()
     if client is None:
         return "Gemini not configured — add GEMINI_API_KEY to generate live recommendations."
@@ -345,7 +329,7 @@ area, write a 2-3 sentence actionable recommendation. Be concrete —
 name the likely cause and a specific first action, don't hedge.
 
 Data: {json.dumps(cell_summary)}"""
-        text = _generate_with_fallback(client, prompt, timeout=10.0)
+        text = await asyncio.to_thread(_generate_with_fallback, client, prompt, 10.0)
         return text.strip()
     except Exception:
         return "Recommendation generation temporarily unavailable."
@@ -422,4 +406,75 @@ def _mock_recommendation(cell_data: dict, fallback_reason: str = "missing_api_ke
         "public_advisory_needed": True,
         "advisory_text": "Elevated air pollution levels detected in your area. Minimize outdoor activity. Close windows. Wear masks if going outside.",
         "fallback_note": note,
+    }
+
+
+# ── Compatibility shims — functions main.py expects ────────────────────────
+
+def is_configured() -> bool:
+    """Return True if a Gemini API key is present and usable."""
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    return bool(key and key.strip())
+
+
+async def close() -> None:
+    """Graceful shutdown — release the persistent client if any."""
+    global _CLIENT
+    _CLIENT = None
+
+
+def unavailable_photo(reason: str = "missing_api_key") -> dict:
+    """Fallback photo result when Gemini is not available."""
+    return {
+        "smoke_visible": True,
+        "haze_visible": True,
+        "visibility_reduced": True,
+        "possible_source": "unclear",
+        "visual_confidence": 0.0,
+        "haze_score": 0.5,
+        "notes": "Photo received — visual analysis will be available once AI service is ready.",
+        "analysis_status": "pending",
+        "analysis_reason": reason,
+    }
+
+
+def unavailable_text(text: str = "", reason: str = "missing_api_key") -> dict:
+    """Fallback text result when Gemini is not available."""
+    return {
+        "translated_text": text,
+        "detected_language": "unknown",
+        "event_type": "smoke",
+        "severity": "moderate",
+        "possible_source": "unclear",
+        "haze_score": 0.5,
+        "reported_symptoms": [],
+        "extracted_location_hint": None,
+        "confidence": 0.0,
+        "analysis_status": "pending",
+        "analysis_reason": reason,
+    }
+
+
+async def analyze_evidence(cell_data: dict) -> dict:
+    """Async wrapper: run both Gemini evidence calls concurrently and return combined result."""
+    import asyncio
+    import concurrent.futures
+
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        explanation_fut = loop.run_in_executor(pool, generate_incident_explanation, cell_data)
+        recommendation_fut = loop.run_in_executor(pool, generate_structured_recommendation, cell_data)
+        explanation, recommendation = await asyncio.gather(
+            explanation_fut, recommendation_fut, return_exceptions=True
+        )
+
+    if isinstance(explanation, Exception):
+        explanation = _mock_incident_explanation(cell_data, fallback_reason=str(explanation)[:80])
+    if isinstance(recommendation, Exception):
+        recommendation = _mock_recommendation(cell_data, fallback_reason=str(recommendation)[:80])
+
+    return {
+        "incident_explanation": explanation,
+        "recommendation": recommendation,
+        "status": "live",
     }
