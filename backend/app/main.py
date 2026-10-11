@@ -1454,11 +1454,8 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
             fallback_reason="fast_mode" if skip_ai else "missing_api_key",
         )
     else:
-        # Run both Gemini calls concurrently. Each call uses _generate_with_timeout
-        # internally (18s) so they will always complete (success or fallback) within
-        # that window. We do NOT wrap with asyncio.wait_for because asyncio.to_thread
-        # threads are non-cancellable — a wait_for timeout just abandons the result
-        # and returns a mock while Gemini is still running in the background.
+        # Run both Gemini calls concurrently — each has a 12s internal timeout
+        # and falls back gracefully, so asyncio.gather always completes.
         incident_result, recommendation_result = await asyncio.gather(
             asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
             asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),

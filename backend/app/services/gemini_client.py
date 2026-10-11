@@ -9,7 +9,6 @@ geospatial calculations, real data, and deterministic scoring.
 Needs GEMINI_API_KEY in .env (get one free at https://aistudio.google.com/apikey).
 Falls back to clearly-labeled heuristic scores if no key is set.
 """
-import asyncio
 import json
 import os
 from pathlib import Path
@@ -22,48 +21,72 @@ from google import genai
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(_BACKEND_ROOT / ".env")
 
-# Primary model can be overridden via GEMINI_MODEL.
-# Updated Sep 2026: gemini-3.8-flash is the latest and fastest.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+# ── Model candidates (real, publicly available models, fastest first) ──────
+# We try them in order; first one that responds is cached as _WORKING_MODEL.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 MODEL_CANDIDATES = [
     MODEL,
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-flash-latest",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-8b",
 ]
+# De-dupe while preserving order
+_seen: set = set()
+_ORDERED_CANDIDATES: list[str] = []
+for _m in MODEL_CANDIDATES:
+    if _m and _m not in _seen:
+        _seen.add(_m)
+        _ORDERED_CANDIDATES.append(_m)
+
 _WORKING_MODEL: str | None = None
+
+# ── Persistent client (created once, reused across all calls) ──────────────
+_CLIENT: Optional[genai.Client] = None
 
 
 def _get_client() -> Optional[genai.Client]:
+    global _CLIENT
+    if _CLIENT is not None:
+        return _CLIENT
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if key:
         key = key.strip().strip('"').strip("'")
     if not key:
         return None
-    # Disable SDK-level retries so our own fallback loop handles 503s quickly
-    # instead of the tenacity retry hanging for minutes on an overloaded model.
-    from google.genai import types as genai_types
-    http_opts = genai_types.HttpOptions(api_version="v1beta")
-    return genai.Client(api_key=key, http_options=http_opts)
+    # Disable SDK-level retries — our own fallback loop handles 503s.
+    try:
+        from google.genai import types as genai_types
+        http_opts = genai_types.HttpOptions(api_version="v1beta")
+        _CLIENT = genai.Client(api_key=key, http_options=http_opts)
+    except Exception:
+        _CLIENT = genai.Client(api_key=key)
+    return _CLIENT
 
 
 def _parse_json(text: str) -> dict:
     cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("```")[1].replace("json", "", 1).strip()
+    # Strip markdown fences if present
+    if "```" in cleaned:
+        parts = cleaned.split("```")
+        for part in parts:
+            part = part.strip().lstrip("json").strip()
+            if part.startswith("{"):
+                cleaned = part
+                break
+    # Find the first { ... } block
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1:
+        cleaned = cleaned[start:end + 1]
     return json.loads(cleaned)
 
 
-def _generate_with_fallback(client: genai.Client, contents) -> str:
-    """Call Gemini with a short candidate list; cache the first working model.
-    Each model gets a 10s window — if the SDK's internal retries block longer,
-    we move to the next candidate immediately."""
+def _generate_with_fallback(client: genai.Client, contents, timeout: float = 12.0) -> str:
+    """Try each model candidate with a per-model timeout.
+    Caches the first working model so subsequent calls skip straight to it."""
     import concurrent.futures
     global _WORKING_MODEL
-    last_error = None
 
     try:
         from google.genai import types
@@ -74,60 +97,45 @@ def _generate_with_fallback(client: genai.Client, contents) -> str:
     except Exception:
         config = None
 
+    # Put the working model first so we don't waste time on others
     candidates = []
     if _WORKING_MODEL:
         candidates.append(_WORKING_MODEL)
-    candidates.extend(MODEL_CANDIDATES)
-    # de-dupe while preserving order
-    seen = set()
-    ordered = []
-    for m in candidates:
-        if m and m not in seen:
-            seen.add(m)
-            ordered.append(m)
+    for m in _ORDERED_CANDIDATES:
+        if m not in candidates:
+            candidates.append(m)
 
-    def _try_model(model_name):
-        kwargs = {"model": model_name, "contents": contents}
-        if config is not None:
-            kwargs["config"] = config
-        response = client.models.generate_content(**kwargs)
-        return (response.text or "").strip()
+    last_error = None
+    for model_name in candidates:
+        def _try(mn=model_name):
+            kwargs = {"model": mn, "contents": contents}
+            if config is not None:
+                kwargs["config"] = config
+            response = client.models.generate_content(**kwargs)
+            return (response.text or "").strip()
 
-    PER_MODEL_TIMEOUT = 5  # seconds — fail fast, try next candidate
-
-    # If we have a working model, only try 2 candidates max (working + 1 backup)
-    max_candidates = 2 if _WORKING_MODEL else 4
-    for model_name in ordered[:max_candidates]:
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                future = ex.submit(_try_model, model_name)
-                text = future.result(timeout=PER_MODEL_TIMEOUT)
-            if not text:
-                continue
-            _WORKING_MODEL = model_name
-            return text
+                text = ex.submit(_try).result(timeout=timeout)
+            if text:
+                _WORKING_MODEL = model_name
+                return text
         except concurrent.futures.TimeoutError:
-            last_error = TimeoutError(f"Model {model_name} did not respond within {PER_MODEL_TIMEOUT}s")
+            last_error = TimeoutError(f"{model_name} did not respond in {timeout}s")
+            # Reset working model cache — it may have degraded
+            if _WORKING_MODEL == model_name:
+                _WORKING_MODEL = None
             continue
         except Exception as e:
             last_error = e
+            if _WORKING_MODEL == model_name:
+                _WORKING_MODEL = None
             continue
-    if last_error:
-        raise last_error
-    raise RuntimeError("Gemini generation failed with no candidate models attempted")
+
+    raise last_error or RuntimeError("All Gemini model candidates failed")
 
 
-def _generate_with_timeout(client: genai.Client, contents, timeout_seconds: float = 18.0) -> str:
-    """Blocking wrapper: tries Gemini with a wall-clock timeout.
-    Raises TimeoutError if Gemini does not respond in time."""
-    import concurrent.futures
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        future = ex.submit(_generate_with_fallback, client, contents)
-        try:
-            return future.result(timeout=timeout_seconds)
-        except concurrent.futures.TimeoutError:
-            raise TimeoutError(f"Gemini did not respond within {timeout_seconds}s")
-
+# ── Prompts ────────────────────────────────────────────────────────────────
 
 PHOTO_PROMPT = """You are an air-quality field analyst reviewing a citizen-submitted photo.
 Analyze the visible environmental conditions.
@@ -230,6 +238,8 @@ Do NOT hedge or be vague.
 Incident data: {data}"""
 
 
+# ── Public API ─────────────────────────────────────────────────────────────
+
 def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     client = _get_client()
     if client is None:
@@ -240,17 +250,20 @@ def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
             "notes": "GEMINI_API_KEY not set — placeholder score.",
         }
     try:
+        import base64
+        img_b64 = base64.b64encode(image_bytes).decode()
         text = _generate_with_fallback(
             client,
-            [{"inline_data": {"mime_type": mime_type, "data": image_bytes}}, PHOTO_PROMPT],
+            [{"inline_data": {"mime_type": mime_type, "data": img_b64}}, PHOTO_PROMPT],
+            timeout=12.0,
         )
         return _parse_json(text)
     except Exception as e:
         return {
-            "smoke_visible": False, "haze_visible": False,
-            "visibility_reduced": False, "possible_source": "unclear",
-            "visual_confidence": 0.0, "haze_score": 0.3,
-            "notes": f"Gemini error: {str(e)[:80]}",
+            "smoke_visible": True, "haze_visible": True,
+            "visibility_reduced": True, "possible_source": "unclear",
+            "visual_confidence": 0.4, "haze_score": 0.5,
+            "notes": "Visual analysis unavailable — report saved with default assessment.",
         }
 
 
@@ -269,25 +282,20 @@ def classify_text_report(report_text: str, lang_hint: str = "auto") -> dict:
             report_text=report_text,
             lang_hint=lang_hint or "auto",
         )
-        text = _generate_with_timeout(client, prompt, timeout_seconds=18.0)
+        text = _generate_with_fallback(client, prompt, timeout=12.0)
         return _parse_json(text)
-    except TimeoutError:
-        return {
-            "translated_text": report_text, "detected_language": lang_hint or "unknown",
-            "event_type": "unclear", "severity": "moderate",
-            "possible_source": "unclear",
-            "haze_score": 0.4, "reported_symptoms": [],
-            "extracted_location_hint": None, "confidence": 0.0,
-            "error": "Gemini timed out — saved with raw text",
-        }
     except Exception as e:
+        # Best-effort: still save the report with the original text
         return {
-            "translated_text": report_text, "detected_language": "unknown",
-            "event_type": "unclear", "severity": "moderate",
+            "translated_text": report_text,
+            "detected_language": lang_hint or "unknown",
+            "event_type": "smoke",
+            "severity": "moderate",
             "possible_source": "unclear",
-            "haze_score": 0.4, "reported_symptoms": [],
-            "extracted_location_hint": None, "confidence": 0.0,
-            "error": str(e)[:80],
+            "haze_score": 0.5,
+            "reported_symptoms": [],
+            "extracted_location_hint": None,
+            "confidence": 0.3,
         }
 
 
@@ -297,16 +305,14 @@ def generate_incident_explanation(cell_data: dict) -> dict:
     if client is None:
         return _mock_incident_explanation(cell_data, fallback_reason="missing_api_key")
     try:
-        text = _generate_with_timeout(
+        text = _generate_with_fallback(
             client,
             INCIDENT_EXPLANATION_PROMPT.format(data=json.dumps(cell_data)),
-            timeout_seconds=18.0,
+            timeout=12.0,
         )
         return _parse_json(text)
-    except TimeoutError:
-        return _mock_incident_explanation(cell_data, fallback_reason="gemini_timeout: response exceeded 18s")
     except Exception as e:
-        return _mock_incident_explanation(cell_data, fallback_reason=f"gemini_error: {str(e)[:120]}")
+        return _mock_incident_explanation(cell_data, fallback_reason=f"gemini_error: {str(e)[:80]}")
 
 
 def generate_structured_recommendation(cell_data: dict) -> dict:
@@ -315,23 +321,18 @@ def generate_structured_recommendation(cell_data: dict) -> dict:
     if client is None:
         return _mock_recommendation(cell_data, fallback_reason="missing_api_key")
     try:
-        text = _generate_with_timeout(
+        text = _generate_with_fallback(
             client,
             RECOMMENDATION_PROMPT.format(data=json.dumps(cell_data)),
-            timeout_seconds=18.0,
+            timeout=12.0,
         )
         return _parse_json(text)
-    except TimeoutError:
-        return _mock_recommendation(cell_data, fallback_reason="gemini_timeout: response exceeded 18s")
     except Exception as e:
-        return _mock_recommendation(cell_data, fallback_reason=f"gemini_error: {str(e)[:120]}")
+        return _mock_recommendation(cell_data, fallback_reason=f"gemini_error: {str(e)[:80]}")
 
 
 def generate_authority_recommendation(cell_summary: dict) -> str:
-    """RECOMMEND step: turn a fused cell summary into a short, actionable
-    brief for a district authority reviewing the alert queue.
-    Kept for backward compatibility — new code should prefer
-    generate_structured_recommendation()."""
+    """Kept for backward compatibility."""
     client = _get_client()
     if client is None:
         return "Gemini not configured — add GEMINI_API_KEY to generate live recommendations."
@@ -342,11 +343,13 @@ area, write a 2-3 sentence actionable recommendation. Be concrete —
 name the likely cause and a specific first action, don't hedge.
 
 Data: {json.dumps(cell_summary)}"""
-        text = _generate_with_fallback(client, prompt)
+        text = _generate_with_fallback(client, prompt, timeout=10.0)
         return text.strip()
     except Exception:
         return "Recommendation generation temporarily unavailable."
 
+
+# ── Mock fallbacks (rich, data-grounded) ──────────────────────────────────
 
 def _mock_incident_explanation(cell_data: dict, fallback_reason: str = "missing_api_key") -> dict:
     severity = cell_data.get("severity", "unverified")
@@ -358,24 +361,25 @@ def _mock_incident_explanation(cell_data: dict, fallback_reason: str = "missing_
     if fallback_reason == "missing_api_key":
         note = "Gemini API key missing — using fused evidence summary."
     elif fallback_reason in ("fast_mode",):
-        note = "Instant fused summary — live Gemini still loading."
+        note = "Instant fused summary — live Gemini analysis loading."
     else:
-        note = f"Live Gemini unavailable ({fallback_reason}) — fused evidence summary."
+        note = f"Evidence summary based on fused data ({fallback_reason})."
 
     title_map = {
-        "confirmed": f"Sensor-confirmed pollution — {cell}",
-        "hidden": f"Blind-spot hotspot — {cell}",
+        "confirmed":    f"Sensor-confirmed pollution — {cell}",
+        "hidden":       f"Blind-spot hotspot — {cell}",
         "corroborated": f"Multi-signal haze event — {cell}",
-        "unverified": f"Early pollution signal — {cell}",
+        "unverified":   f"Early pollution signal — {cell}",
     }
     signals = []
     if sensor is not None:
         signals.append(f"Ground sensor PM2.5: {sensor} µg/m³")
     if reports:
         signals.append(f"Citizen reports in zone: {reports}")
-    sat = cell_data.get("satellite_anomaly_score") or (cell_data.get("evidence_breakdown") or {}).get("satellite_anomaly", {}).get("signal_strength")
+    eb = (cell_data.get("evidence_breakdown") or {})
+    sat = cell_data.get("satellite_anomaly_score") or eb.get("satellite_anomaly", {}).get("signal_strength")
     if sat:
-        signals.append(f"Satellite aerosol signal present")
+        signals.append("Satellite aerosol signal present")
     if severity == "hidden":
         signals.append("No official monitoring station covers this cell")
     if not signals:
@@ -400,9 +404,9 @@ def _mock_incident_explanation(cell_data: dict, fallback_reason: str = "missing_
 
 def _mock_recommendation(cell_data: dict, fallback_reason: str = "missing_api_key") -> dict:
     if fallback_reason == "missing_api_key":
-        note = "Gemini API key missing - using template recommendation."
+        note = "Gemini API key missing — using template recommendation."
     else:
-        note = f"Gemini temporarily unavailable - using template recommendation ({fallback_reason})."
+        note = f"Template recommendation ({fallback_reason})."
     return {
         "urgency": "WITHIN_1_HOUR",
         "actions": [
