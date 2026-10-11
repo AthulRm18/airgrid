@@ -237,6 +237,21 @@ def get_all_incidents() -> list[dict]:
     return list(_FALLBACK_STORE["incidents"])
 
 
+def update_incident(incident_id: str, updates: dict):
+    """Persist completed analysis so polling and page refreshes see the result."""
+    _init_firebase()
+    for incident in _FALLBACK_STORE["incidents"]:
+        if incident.get("incident_id") == incident_id:
+            incident.update(updates)
+            break
+    _persist_state()
+    if _using_firebase and _db:
+        try:
+            _db.collection("incidents").document(incident_id).update(updates)
+        except Exception:
+            pass
+
+
 def clear_incidents():
     _init_firebase()
     _FALLBACK_STORE["incidents"].clear()

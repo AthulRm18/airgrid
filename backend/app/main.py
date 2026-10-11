@@ -131,7 +131,17 @@ _HOTSPOTS_CACHE: dict = {"ts": 0.0, "data": None}
 _EVIDENCE_CACHE: dict[str, dict] = {}
 _OPENAQ_ENDPOINT_TIMEOUT = float(os.environ.get("OPENAQ_ENDPOINT_TIMEOUT", "20"))
 _EVIDENCE_CACHE_TTL_SECONDS = float(os.environ.get("EVIDENCE_CACHE_TTL_SECONDS", "300"))
-_GEMINI_EVIDENCE_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_EVIDENCE_TIMEOUT_SECONDS", "15"))
+_EVIDENCE_INFLIGHT: dict[tuple[int, str], asyncio.Task] = {}
+_CACHE_GENERATION = 0
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+_MAX_PHOTO_BYTES = 10 * 1024 * 1024
+
+
+def _track_task(coro):
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
 
 
 @app.on_event("startup")
@@ -182,34 +192,26 @@ async def _train_forecast_on_startup():
             _DEMO_SEEDED = True
             print(f"[CONFLUX] {len(existing)} reports already in DB — skipping auto-seed to preserve data.")
 
-    # Warm up Gemini so the first user request doesn't timeout on cold start
-    try:
-        await asyncio.wait_for(
-            asyncio.to_thread(gemini_client.classify_text_report, "ping"),
-            timeout=12.0,
-        )
-        print("[CONFLUX] Gemini warm-up complete — model ready for requests.")
-
-        # Pre-cache AI evidence for all demo hotspots in background
-        # so judges get instant Gemini analysis when clicking hotspots
+    # Prepare useful evidence after startup, without a paid "ping" or delaying
+    # readiness. Foreground requests share these in-flight generations.
+    if gemini_client.is_configured():
         async def _precache_evidence():
             try:
                 hotspots = await _get_hotspots_cached(max_age_seconds=60.0)
-                cells = [h["h3_cell"] for h in hotspots.get("hotspots", [])[:6]]
-                for cell in cells:
-                    try:
-                        payload = await _build_evidence_payload(cell)
-                        _EVIDENCE_CACHE[cell] = {"ts": time.time(), "payload": payload}
-                        print(f"[CONFLUX] Pre-cached evidence for {cell[:12]}")
-                    except Exception:
-                        pass
-                print(f"[CONFLUX] Evidence pre-cache complete ({len(cells)} hotspots).")
-            except Exception as exc:
-                print(f"[CONFLUX] Evidence pre-cache skipped: {exc}")
-        asyncio.create_task(_precache_evidence())
+                for item in hotspots.get("hotspots", [])[:3]:
+                    await _get_evidence_cached(item["h3_cell"], _EVIDENCE_CACHE_TTL_SECONDS)
+            except Exception:
+                print("[Gemini] Evidence warm-up unavailable; foreground requests can retry.")
+        _track_task(_precache_evidence())
 
-    except Exception as exc:
-        print(f"[CONFLUX] Gemini warm-up skipped: {exc}")
+
+@app.on_event("shutdown")
+async def _stop_analysis():
+    for task in list(_BACKGROUND_TASKS):
+        task.cancel()
+    if _BACKGROUND_TASKS:
+        await asyncio.gather(*list(_BACKGROUND_TASKS), return_exceptions=True)
+    await gemini_client.close()
 
 
 class CitizenReport(BaseModel):
@@ -438,9 +440,7 @@ class VoiceTranscriptIn(BaseModel):
 @app.post("/api/voice-transcript")
 async def process_voice_transcript(body: VoiceTranscriptIn):
     """Process a voice transcript through Gemini for translation + classification."""
-    result = await asyncio.to_thread(
-        gemini_client.classify_text_report, body.transcript, body.lang
-    )
+    result = await gemini_client.classify_text_report(body.transcript, body.lang)
     return {
         "original": body.transcript,
         "translated": result.get("translated_text", body.transcript),
@@ -450,6 +450,7 @@ async def process_voice_transcript(body: VoiceTranscriptIn):
         "haze_score": result.get("haze_score", 0.5),
         "extracted_location_hint": result.get("extracted_location_hint"),
         "reported_symptoms": result.get("reported_symptoms", []),
+        **{k: v for k, v in result.items() if k.startswith("analysis_")},
     }
 
 
@@ -535,8 +536,8 @@ async def submit_report(report: CitizenReport):
     gemini_result = None
     if record["haze_score"] is None and report.text and not report.is_demo:
         # Run synchronous Gemini call in thread pool so it doesn't block the event loop
-        gemini_result = await asyncio.to_thread(gemini_client.classify_text_report, report.text)
-        record["haze_score"] = gemini_result.get("haze_score", 0.5)
+        gemini_result = await gemini_client.classify_text_report(report.text)
+        record["haze_score"] = gemini_result.get("haze_score") if gemini_result.get("haze_score") is not None else 0.5
     elif record["haze_score"] is None:
         record["haze_score"] = 0.6  # default for demo reports
 
@@ -552,6 +553,25 @@ async def submit_report(report: CitizenReport):
     )
 
 
+async def _read_photo(file: UploadFile) -> tuple[bytes, str]:
+    mime = (file.content_type or "image/jpeg").lower()
+    if mime not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        raise HTTPException(status_code=415, detail="Use a JPEG, PNG, WebP, or GIF photo")
+    image = await file.read(_MAX_PHOTO_BYTES + 1)
+    if not image or len(image) > _MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="Use a nonempty photo smaller than 10 MB")
+    return image, mime
+
+
+def _pending_photo():
+    return {**gemini_client.unavailable_photo(), "analysis_status": "pending",
+            "analysis_reason": None, "notes": "Photo saved — AI analysis in progress."}
+
+
+def _pending_text(text):
+    return {**gemini_client.unavailable_text(text), "analysis_status": "pending", "analysis_reason": None}
+
+
 @app.post("/api/citizen-report/photo")
 async def submit_photo_report(
     lat: float = Form(...), lng: float = Form(...), file: UploadFile = File(...),
@@ -560,149 +580,100 @@ async def submit_photo_report(
     country_code = str(country_code).strip().upper()
     if country_code not in BRICS_COUNTRIES:
         raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
-    image_bytes = await file.read()
-    mime = file.content_type or "image/jpeg"
-
-    # Save immediately with default score — never make the user wait for Gemini
-    default_scoring = {
-        "smoke_visible": True, "haze_visible": True,
-        "visibility_reduced": True, "possible_source": "analyzing...",
-        "visual_confidence": 0.0, "haze_score": 0.55,
-        "notes": "Photo received — AI analysis in progress.",
-    }
-
-    record = _create_report_record(
-        lat=lat, lng=lng, source="photo", country_code=country_code,
-        haze_score=0.55,
-        photo_classification=default_scoring,
-        gemini_classification=default_scoring,
-    )
-
-    # Fire-and-forget: analyze photo with Gemini in background and update the record
-    async def _background_analyze(report_id: str, img: bytes, mime_type: str):
-        try:
-            scoring = await asyncio.wait_for(
-                asyncio.to_thread(gemini_client.score_photo, img, mime_type),
-                timeout=20.0,
-            )
-            # Update the stored report with real Gemini analysis
-            fb.update_citizen_report(report_id, {
-                "haze_score": scoring.get("haze_score", 0.55),
-                "photo_classification": scoring,
-                "gemini_classification": scoring,
-            })
-            print(f"[Photo] Background analysis complete for {report_id[:8]}: haze={scoring.get('haze_score')}")
-        except Exception as e:
-            print(f"[Photo] Background analysis failed for {report_id[:8]}: {e}")
-
-    asyncio.create_task(_background_analyze(record["id"], image_bytes, mime))
-
+    image, mime = await _read_photo(file)
+    scoring = _pending_photo() if gemini_client.is_configured() else gemini_client.unavailable_photo("missing_api_key")
+    record = _create_report_record(lat=lat, lng=lng, source="photo", country_code=country_code,
+        haze_score=0.5, photo_classification=scoring, gemini_classification=scoring)
+    if scoring["analysis_status"] == "pending":
+        async def analyze():
+            try:
+                result = await gemini_client.score_photo(image, mime)
+            except asyncio.CancelledError:
+                result = gemini_client.unavailable_photo("interrupted")
+                fb.update_citizen_report(record["id"], {"photo_classification": result, "gemini_classification": result})
+                raise
+            fb.update_citizen_report(record["id"], {"haze_score": result["haze_score"] if result.get("haze_score") is not None else 0.5,
+                "photo_classification": result, "gemini_classification": result})
+            _invalidate_runtime_caches()
+        _track_task(analyze())
     return record
+
+
+async def _analyze_incident(incident: dict, image: bytes | None, mime: str):
+    text = incident["text"]
+    cancelled = False
+    try:
+        text_result, photo_result = await asyncio.gather(
+            gemini_client.classify_text_report(text) if text else asyncio.sleep(0, result=None),
+            gemini_client.score_photo(image, mime) if image is not None else asyncio.sleep(0, result=None),
+        )
+    except asyncio.CancelledError:
+        cancelled = True
+        text_result = gemini_client.unavailable_text(text, reason="interrupted") if text else None
+        photo_result = gemini_client.unavailable_photo("interrupted") if image is not None else None
+    except Exception:
+        text_result = gemini_client.unavailable_text(text) if text else None
+        photo_result = gemini_client.unavailable_photo() if image is not None else None
+
+    results = [r for r in (text_result, photo_result) if r is not None]
+    live = sum(r.get("analysis_status") == "live" for r in results)
+    scores = [r["haze_score"] for r in results if r.get("haze_score") is not None]
+    score = max(scores) if scores else 0.5
+    updates = {"text_analysis": text_result, "photo_analysis": photo_result,
+        "combined_haze_score": score,
+        "analysis_status": "live" if live == len(results) else ("partial" if live else "unavailable")}
+    incident.update(updates)
+    fb.update_incident(incident["incident_id"], updates)
+    fb.update_citizen_report(incident["id"], {"gemini_classification": text_result,
+        "photo_classification": photo_result, "haze_score": score})
+    _invalidate_runtime_caches()
+    if cancelled:
+        raise asyncio.CancelledError
 
 
 @app.post("/api/incidents/report")
 async def submit_incident(
-    lat: float = Form(...),
-    lng: float = Form(...),
-    text: str = Form(default=""),
-    location_hint: str = Form(default=""),
-    country_code: str = Form(default=LOCAL_COUNTRY),
-    haze_score: float | None = Form(default=None),
-    skip_gemini: str = Form(default="false"),
-    file: UploadFile | None = File(default=None),
-    x_session_token: str | None = Header(default=None),
+    lat: float = Form(...), lng: float = Form(...), text: str = Form(default=""),
+    location_hint: str = Form(default=""), country_code: str = Form(default=LOCAL_COUNTRY),
+    file: UploadFile | None = File(default=None), x_session_token: str | None = Header(default=None),
 ):
     reporter = _session_user(x_session_token)
     normalized_country = str(country_code).strip().upper()
     if normalized_country not in BRICS_COUNTRIES:
         raise HTTPException(status_code=400, detail=f"country_code must be one of {sorted(BRICS_COUNTRIES)}")
-
-    text = text.strip()
-    location_hint = location_hint.strip()
+    text, location_hint = text.strip(), location_hint.strip()
     if not text and file is None:
         raise HTTPException(status_code=400, detail="Provide text, photo, or both")
-
+    image, mime = await _read_photo(file) if file is not None else (None, "image/jpeg")
+    configured = gemini_client.is_configured()
+    text_result = (_pending_text(text) if configured else gemini_client.unavailable_text(text, reason="missing_api_key")) if text else None
+    photo_result = (_pending_photo() if configured else gemini_client.unavailable_photo("missing_api_key")) if file is not None else None
     incident_id = str(uuid.uuid4())
-    text_classification = None
-    photo_classification = None
-    haze_candidates: list[float] = []
-    use_preclassified = skip_gemini.lower() in ("1", "true", "yes") and haze_score is not None
-
-    if use_preclassified:
-        # Voice path already ran Gemini — skip a second round-trip
-        haze_candidates.append(float(haze_score))
-        text_classification = {
-            "haze_score": float(haze_score),
-            "event_type": "smoke",
-            "severity": "high" if float(haze_score) >= 0.7 else "moderate",
-            "translated_text": text,
-            "detected_language": "preclassified",
-            "confidence": 0.85,
-        }
-    elif text:
-        try:
-            text_classification = await asyncio.wait_for(
-                asyncio.to_thread(gemini_client.classify_text_report, text),
-                timeout=8.0,
-            )
-        except asyncio.TimeoutError:
-            text_classification = {
-                "haze_score": 0.55, "event_type": "smoke", "severity": "moderate",
-                "translated_text": text, "detected_language": "Unknown",
-            }
-        if text_classification.get("haze_score") is not None:
-            haze_candidates.append(float(text_classification["haze_score"]))
-
-    if file is not None:
-        image_bytes = await file.read()
-        try:
-            photo_classification = await asyncio.wait_for(
-                asyncio.to_thread(
-                    gemini_client.score_photo,
-                    image_bytes,
-                    file.content_type or "image/jpeg",
-                ),
-                timeout=10.0,
-            )
-        except asyncio.TimeoutError:
-            photo_classification = {"haze_score": 0.5, "notes": "Photo analysis timed out"}
-        if photo_classification.get("haze_score") is not None:
-            haze_candidates.append(float(photo_classification["haze_score"]))
-
-    record = _create_report_record(
-        lat=lat,
-        lng=lng,
+    # Persist before contacting Gemini. A slow provider cannot prevent submission.
+    record = _create_report_record(lat=lat, lng=lng,
         source="multimodal" if text and file is not None else ("photo" if file is not None else "text"),
-        text=text,
-        country_code=normalized_country,
-        haze_score=max(haze_candidates) if haze_candidates else 0.5,
-        gemini_classification=text_classification,
-        photo_classification=photo_classification,
-        incident_id=incident_id,
-        reporter=reporter,
-        location_hint=location_hint or None,
-    )
-
-    incident = {
-        "incident_id": incident_id,
-        "id": record["id"],
-        "country_code": normalized_country,
-        "lat": lat,
-        "lng": lng,
-        "h3_cell": record["h3_cell"],
-        "text": text,
-        "location_hint": location_hint or None,
-        "reporter": _public_user(reporter) if reporter else None,
-        "submitted_at": record["submitted_at"],
-        "source": record["source"],
-        "text_present": bool(text),
-        "photo_present": file is not None,
-        "text_analysis": text_classification,
-        "photo_analysis": photo_classification,
-        "combined_haze_score": record["haze_score"],
-    }
+        text=text, country_code=normalized_country, haze_score=0.5,
+        gemini_classification=text_result, photo_classification=photo_result,
+        incident_id=incident_id, reporter=reporter, location_hint=location_hint or None)
+    incident = {"incident_id": incident_id, "id": record["id"], "country_code": normalized_country,
+        "lat": lat, "lng": lng, "h3_cell": record["h3_cell"], "text": text,
+        "location_hint": location_hint or None, "reporter": _public_user(reporter) if reporter else None,
+        "submitted_at": record["submitted_at"], "source": record["source"],
+        "text_present": bool(text), "photo_present": file is not None,
+        "text_analysis": text_result, "photo_analysis": photo_result,
+        "combined_haze_score": record["haze_score"], "analysis_status": "pending" if configured else "unavailable"}
     fb.add_incident(incident)
     INCIDENTS.append(incident)
+    if configured:
+        _track_task(_analyze_incident(incident, image, mime))
+    return dict(incident)
+
+
+@app.get("/api/incidents/{incident_id}")
+async def get_incident(incident_id: str):
+    incident = next((i for i in fb.get_all_incidents() if i.get("incident_id") == incident_id), None)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
     return incident
 
 
@@ -823,6 +794,9 @@ async def get_hotspots(bbox: str | None = None):
 @app.get("/api/hotspots/{h3_cell}/evidence")
 async def get_evidence(h3_cell: str, fast: bool = False):
     if fast:
+        cached = _EVIDENCE_CACHE.get(h3_cell)
+        if cached and cached["payload"].get("ai_analysis", {}).get("status") == "live" and time.monotonic() - cached["ts"] < _EVIDENCE_CACHE_TTL_SECONDS:
+            return {**cached["payload"], "ai_analysis": {**cached["payload"]["ai_analysis"], "cached": True}}
         return await _build_evidence_payload(h3_cell, skip_ai=True)
     return await _get_evidence_cached(h3_cell, max_age_seconds=_EVIDENCE_CACHE_TTL_SECONDS)
 
@@ -837,7 +811,7 @@ async def get_recommendation(h3_cell: str):
     match = next((h for h in hotspots["hotspots"] if h["h3_cell"] == h3_cell), None)
     if match is None:
         raise HTTPException(status_code=404, detail="cell not currently a hotspot")
-    recommendation = gemini_client.generate_authority_recommendation(match)
+    recommendation = await gemini_client.generate_authority_recommendation(match)
     return {**match, "recommendation": recommendation}
 
 
@@ -1318,6 +1292,8 @@ async def _get_hotspots_cached(max_age_seconds: float = 12.0):
 
 
 def _invalidate_runtime_caches(clear_satellite: bool = False):
+    global _CACHE_GENERATION
+    _CACHE_GENERATION += 1
     _HOTSPOTS_CACHE["ts"] = 0.0
     _HOTSPOTS_CACHE["data"] = None
     _EVIDENCE_CACHE.clear()
@@ -1347,23 +1323,26 @@ def _build_fallback_forecast(match: dict, hours: int = 12) -> list[dict]:
 
 async def _get_evidence_cached(h3_cell: str, max_age_seconds: float = 20.0):
     cached = _EVIDENCE_CACHE.get(h3_cell)
-    if cached and (time.time() - cached.get("ts", 0.0)) <= max_age_seconds:
-        return cached["payload"]
-
-    payload = await _build_evidence_payload(h3_cell)
-
-    # Do not cache placeholder/template AI responses. If Gemini timed out once,
-    # the next request should retry live generation instead of repeating fallback.
-    incident_note = str(payload.get("incident_explanation", {}).get("confidence_note", "")).lower()
-    recommendation_note = str(payload.get("recommendation", {}).get("fallback_note", "")).lower()
-    has_fallback_template = (
-        "template explanation" in incident_note
-        or "template recommendation" in recommendation_note
-    )
-
-    if not has_fallback_template:
-        _EVIDENCE_CACHE[h3_cell] = {"ts": time.time(), "payload": payload}
-    return payload
+    if cached:
+        ttl = max_age_seconds if cached["payload"].get("ai_analysis", {}).get("status") == "live" else 5.0
+        if time.monotonic() - cached["ts"] <= ttl:
+            return {**cached["payload"], "ai_analysis": {**cached["payload"]["ai_analysis"], "cached": True}}
+    key = (_CACHE_GENERATION, h3_cell)
+    task = _EVIDENCE_INFLIGHT.get(key)
+    if task is None:
+        async def generate():
+            payload = await _build_evidence_payload(h3_cell)
+            if key[0] == _CACHE_GENERATION:
+                _EVIDENCE_CACHE[h3_cell] = {"ts": time.monotonic(), "payload": payload}
+            return payload
+        task = _track_task(generate())
+        _EVIDENCE_INFLIGHT[key] = task
+        def finished(done):
+            _EVIDENCE_INFLIGHT.pop(key, None)
+            if not done.cancelled():
+                done.exception()
+        task.add_done_callback(finished)
+    return await asyncio.shield(task)
 
 
 async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
@@ -1373,7 +1352,13 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
         raise HTTPException(status_code=404, detail="cell not currently a hotspot")
 
     impact = impact_engine.compute_impact_score(h3_cell, match.get("confidence_score", 0))
-    weather = await weather_client.fetch_weather(h3_cell)
+    # Fused evidence must render immediately, even if the weather provider stalls.
+    weather = _WEATHER_CACHE.get(h3_cell) or weather_client._mock_weather(h3_cell)
+    if not skip_ai:
+        try:
+            weather = await asyncio.wait_for(weather_client.fetch_weather(h3_cell), timeout=2.0)
+        except TimeoutError:
+            pass
 
     corridor = compute_propagation_corridor(
         h3_cell,
@@ -1442,44 +1427,19 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
         "corridor_impact": corridor_impact,
     }
 
-    if skip_ai or not os.environ.get("GEMINI_API_KEY"):
-        incident_explanation = gemini_client._mock_incident_explanation(
-            explanation_data,
-            fallback_reason="fast_mode" if skip_ai else "missing_api_key",
-        )
-        if match.get("explanation"):
-            incident_explanation["summary"] = match["explanation"]
-        recommendation = gemini_client._mock_recommendation(
-            rec_data,
-            fallback_reason="fast_mode" if skip_ai else "missing_api_key",
-        )
+    if skip_ai:
+        reason = "fast_mode" if gemini_client.is_configured() else "missing_api_key"
+        incident_explanation = gemini_client._mock_incident_explanation(explanation_data, reason)
+        recommendation = gemini_client._mock_recommendation(rec_data, reason)
+        ai_analysis = {"status": "pending" if gemini_client.is_configured() else "unavailable", "reason": reason}
     else:
-        # Run both Gemini calls concurrently — each has a 12s internal timeout
-        # and falls back gracefully, so asyncio.gather always completes.
-        incident_result, recommendation_result = await asyncio.gather(
-            asyncio.to_thread(gemini_client.generate_incident_explanation, explanation_data),
-            asyncio.to_thread(gemini_client.generate_structured_recommendation, rec_data),
-            return_exceptions=True,
-        )
-
-        if isinstance(incident_result, Exception):
-            incident_explanation = gemini_client._mock_incident_explanation(
-                explanation_data,
-                fallback_reason=f"gemini_error: {str(incident_result)[:120]}",
-            )
-        else:
-            incident_explanation = incident_result
-
-        if isinstance(recommendation_result, Exception):
-            recommendation = gemini_client._mock_recommendation(
-                rec_data,
-                fallback_reason=f"gemini_error: {str(recommendation_result)[:120]}",
-            )
-        else:
-            recommendation = recommendation_result
-
-        if match.get("explanation") and "template explanation" in str(incident_explanation.get("confidence_note", "")).lower():
-            incident_explanation["summary"] = match["explanation"]
+        analysis = await gemini_client.analyze_evidence(rec_data)
+        incident_explanation = analysis["incident_explanation"]
+        recommendation = analysis["recommendation"]
+        ai_analysis = {"status": analysis["analysis_status"], "reason": analysis["analysis_reason"],
+            "model": analysis.get("analysis_model"), "cached": analysis.get("analysis_cached", False)}
+    if incident_explanation.get("analysis_source") == "fused_evidence" and match.get("explanation"):
+        incident_explanation["summary"] = match["explanation"]
 
     eb = match.get("evidence_breakdown", {})
     evidence_checklist = []
@@ -1524,6 +1484,7 @@ async def _build_evidence_payload(h3_cell: str, skip_ai: bool = False):
         "spike_info": spike_info,
         "incident_explanation": incident_explanation,
         "recommendation": recommendation,
+        "ai_analysis": ai_analysis,
         "evidence_checklist": evidence_checklist,
     }
 
