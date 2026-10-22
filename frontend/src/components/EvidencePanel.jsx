@@ -80,6 +80,15 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
     };
   }, [h3Cell, retry]);
 
+  const data = full ?? hotspot;
+  const confidence = Math.round((data?.confidence_score ?? 0) * 100);
+  const sev = data?.severity ?? "unknown";
+  const placeName = useMemo(() => {
+    const lat = data?.lat ?? hotspot?.lat;
+    const lng = data?.lng ?? hotspot?.lng;
+    return getPlaceName(lat, lng);
+  }, [data?.lat, data?.lng, hotspot?.lat, hotspot?.lng]);
+
   useEffect(() => {
     if (full?.recommendation?.advisory_text) {
       setAdvisoryText(full.recommendation.advisory_text);
@@ -92,14 +101,6 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
     }
   }, [full, placeName]);
 
-  const data = full ?? hotspot;
-  const confidence = Math.round((data?.confidence_score ?? 0) * 100);
-  const sev = data?.severity ?? "unknown";
-  const placeName = useMemo(() => {
-    const lat = data?.lat ?? hotspot?.lat;
-    const lng = data?.lng ?? hotspot?.lng;
-    return getPlaceName(lat, lng);
-  }, [data?.lat, data?.lng, hotspot?.lat, hotspot?.lng]);
   if (!h3Cell) return null;
 
   const sevColor = {
