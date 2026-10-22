@@ -18,28 +18,26 @@ from pydantic import BaseModel, Field, ValidationError
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 logger = logging.getLogger(__name__)
 
-# Flash-Lite prioritizes short classification and dashboard responses. Explicit
-# deployment overrides remain supported; unavailable models are cooled down.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip() or "gemini-3.1-flash-lite"
-FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip() or "gemini-3.5-flash-lite"
+# Flash models prioritize fast multimodal vision, classification and dashboard responses.
+# Explicit deployment overrides remain supported; unavailable models are cooled down.
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
+FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
 
 _DEFAULT_CANDIDATES = [
     MODEL,
     FALLBACK_MODEL,
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash-lite",
-    "gemini-3.5-flash",
     "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
     "gemini-3.7-flash",
     "gemini-flash-lite-latest",
     "gemini-3-flash-preview",
-    "gemini-3.8-flash",
 ]
 MODEL_CANDIDATES = list(dict.fromkeys(m for m in _DEFAULT_CANDIDATES if m))
 
-REQUEST_BUDGET = max(1.0, min(float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "10")), 20.0))
-# Per-attempt budget: Google API requires at least 10s if timeout is explicitly set
-ATTEMPT_BUDGET = max(10.0, REQUEST_BUDGET)
+REQUEST_BUDGET = max(1.0, min(float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "25")), 40.0))
+# Per-attempt budget: allows enough time per model while ensuring fallback candidates can be tried
+ATTEMPT_BUDGET = min(10.0, REQUEST_BUDGET)
 CACHE_TTL = 300.0
 _CACHE_LIMIT = 256
 _CLIENT: genai.Client | None = None
@@ -427,6 +425,9 @@ async def score_photo(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict
         )
     except GeminiUnavailable as exc:
         return unavailable_photo(exc.reason)
+    except Exception as exc:
+        logger.exception("Unexpected error in score_photo: %s", exc)
+        return unavailable_photo(_failure_reason(exc))
 
 
 async def classify_text_report(report_text: str, lang_hint: str = "auto") -> dict:
@@ -442,6 +443,9 @@ async def classify_text_report(report_text: str, lang_hint: str = "auto") -> dic
         return result
     except GeminiUnavailable as exc:
         return unavailable_text(report_text, lang_hint or "unknown", exc.reason)
+    except Exception as exc:
+        logger.exception("Unexpected error in classify_text_report: %s", exc)
+        return unavailable_text(report_text, lang_hint or "unknown", _failure_reason(exc))
 
 
 async def analyze_evidence(cell_data: dict) -> dict:
