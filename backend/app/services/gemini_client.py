@@ -20,24 +20,25 @@ logger = logging.getLogger(__name__)
 
 # Flash models prioritize fast multimodal vision, classification and dashboard responses.
 # Explicit deployment overrides remain supported; unavailable models are cooled down.
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash").strip() or "gemini-3.6-flash"
-FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash").strip() or "gemini-3.5-flash"
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip() or "gemini-3-flash-preview"
+FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.1-flash-lite-preview").strip() or "gemini-3.1-flash-lite-preview"
 
 _DEFAULT_CANDIDATES = [
     MODEL,
     FALLBACK_MODEL,
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-3.1-flash-lite",
-    "gemini-3.7-flash",
-    "gemini-flash-lite-latest",
-    "gemini-3-flash-preview",
+    "gemini-3.8-flash",
 ]
 MODEL_CANDIDATES = list(dict.fromkeys(m for m in _DEFAULT_CANDIDATES if m))
 
-REQUEST_BUDGET = max(1.0, min(float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "25")), 40.0))
+REQUEST_BUDGET = max(1.0, min(float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "30")), 45.0))
 # Per-attempt budget: allows enough time per model while ensuring fallback candidates can be tried
-ATTEMPT_BUDGET = min(10.0, REQUEST_BUDGET)
+ATTEMPT_BUDGET = min(12.0, REQUEST_BUDGET)
 CACHE_TTL = 300.0
 _CACHE_LIMIT = 256
 _CLIENT: genai.Client | None = None
@@ -242,19 +243,29 @@ async def _produce(contents, schema, kind: str, max_tokens: int) -> dict:
                     except Exception as exc:
                         reason = _failure_reason(exc)
                         err_str = str(exc)
-                        is_per_model = (
-                            "permodel" in err_str.lower()
-                            or ("quota" in err_str.lower() and "model" in err_str.lower())
-                            or reason == "model_unavailable"
+                        is_quota_per_model = (
+                            ("quota" in err_str.lower() or "resource_exhausted" in err_str.lower())
+                            and ("model" in err_str.lower() or "free_tier" in err_str.lower() or "dimension" in err_str.lower())
                         )
-                        logger.warning("Gemini %s: model=%s reason=%s (per_model=%s)", kind, model, reason, is_per_model)
-                        if is_per_model:
+                        is_overloaded = "503" in err_str or "UNAVAILABLE" in err_str or "504" in err_str or "DEADLINE_EXCEEDED" in err_str
+                        is_not_found = reason == "model_unavailable" or "404" in err_str or "NOT_FOUND" in err_str
+
+                        logger.warning("Gemini %s: model=%s reason=%s (quota_per_model=%s, overloaded=%s)", kind, model, reason, is_quota_per_model, is_overloaded)
+                        if is_quota_per_model:
+                            # Quotas in Google AI Studio free tier are enforced per-model (20 req/day).
+                            # Cool down this specific model and immediately proceed to candidate fallbacks.
                             _MODEL_COOLDOWNS[model] = time.monotonic() + 3600
+                            continue
+                        if is_not_found:
+                            _MODEL_COOLDOWNS[model] = time.monotonic() + 86400
+                            continue
+                        if is_overloaded:
+                            _MODEL_COOLDOWNS[model] = time.monotonic() + 120
                             continue
                         if reason in ("rate_limited", "access_denied", "invalid_request"):
                             _SERVICE_COOLDOWN = time.monotonic() + (15 if reason == "rate_limited" else 60)
                             break
-                        _MODEL_COOLDOWNS[model] = time.monotonic() + 10
+                        _MODEL_COOLDOWNS[model] = time.monotonic() + 30
     except TimeoutError:
         reason = "timeout"
     raise GeminiUnavailable(reason)

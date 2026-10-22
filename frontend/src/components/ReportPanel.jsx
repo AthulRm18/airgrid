@@ -90,7 +90,7 @@ export default function ReportPanel({
       } catch {
         if (ctrl.signal.aborted) return;
       }
-      if (Date.now() - started < 18000) {
+      if (Date.now() - started < 30000) {
         timer = setTimeout(poll, 700);
       } else {
         setLastResult((current) => current?.incident_id === lastResult.incident_id
@@ -101,7 +101,7 @@ export default function ReportPanel({
       ctrl.abort();
       setLastResult((current) => current?.incident_id === lastResult.incident_id
         ? { ...current, analysis_status: "unavailable" } : current);
-    }, 20000);
+    }, 32000);
     timer = setTimeout(poll, 300);
     return () => {
       ctrl.abort();
@@ -495,7 +495,23 @@ function ClassificationResult({ result, onClear }) {
   const assessed = analysis.analysis_status === "live";
   const photoAssessed = photoAnalysis?.analysis_status === "live";
 
-  const eventType = assessed ? (analysis.event_type || analysis.possible_source || "unclear") : pending ? "Analyzing report" : "Unassessed report";
+  let eventType = "Unassessed report";
+  if (pending) {
+    eventType = "Analyzing report";
+  } else if (assessed) {
+    if (analysis.event_type && analysis.event_type !== "unclear") {
+      eventType = analysis.event_type;
+    } else if (analysis.possible_source && analysis.possible_source !== "unclear") {
+      eventType = analysis.possible_source;
+    } else if (photoAssessed) {
+      if (photoAnalysis.smoke_visible) eventType = "smoke";
+      else if (photoAnalysis.haze_visible) eventType = "haze";
+      else eventType = "photo assessed";
+    } else {
+      eventType = "unclear";
+    }
+  }
+
   const severity = analysis.severity || (result.combined_haze_score >= 0.7 ? "high" : result.combined_haze_score >= 0.4 ? "moderate" : "low");
   const hazeScore = result.combined_haze_score ?? analysis.haze_score ?? 0;
   const description = pending ? "Report saved — Gemini is analyzing it." : assessed
@@ -515,6 +531,7 @@ function ClassificationResult({ result, onClear }) {
     smoke: Flame, industrial: Flame, vehicular: Wind,
     agricultural_burning: Flame, dust: CloudRain,
     construction: AlertTriangle, unclear: Eye,
+    "photo assessed": Eye,
   };
   const EventIcon = eventIcons[eventType] || Eye;
 

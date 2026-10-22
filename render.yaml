@@ -8,11 +8,11 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
-        value: gemini-3.6-flash
+        value: gemini-3-flash-preview
       - key: GEMINI_FALLBACK_MODEL
-        value: gemini-3.5-flash
+        value: gemini-3.1-flash-lite-preview
       - key: GEMINI_TIMEOUT_SECONDS
-        value: 25
+        value: 30
       - key: OPENAQ_API_KEY
         sync: false
       - key: USE_EARTH_ENGINE
