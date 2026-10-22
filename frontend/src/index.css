@@ -187,3 +187,31 @@ body {
   background: var(--color-sev-confirmed);
   animation: mic-bar-bounce 0.6s ease-in-out infinite;
 }
+
+/* ── Print styling for Statutory Evidence Dossier ── */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #legal-dossier-print, #legal-dossier-print * {
+    visibility: visible;
+  }
+  #legal-dossier-print {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 16px !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+}
+
