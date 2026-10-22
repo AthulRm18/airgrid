@@ -423,6 +423,7 @@ function App() {
         <EvidencePanel
           h3Cell={evidenceCell}
           hotspot={evidenceHotspot}
+          role={session?.role}
           onClose={() => { setEvidenceCell(null); setEvidenceHotspot(null); }}
         />
       )}
