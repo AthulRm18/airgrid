@@ -384,18 +384,18 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
               </div>
             </Section>
 
-            {/* Export Legal Evidence Dossier Card */}
+            {/* Export Official Incident Report Card */}
             <div className="rounded-2xl border border-[rgba(99,102,241,0.25)] bg-[rgba(99,102,241,0.04)] p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-1.5 mb-1">
                     <FileText size={14} className="text-[#6366f1]" />
                     <span className="text-sm font-semibold text-[var(--color-mist-50)]">
-                      Legal Evidence Dossier
+                      Official Incident Report
                     </span>
                   </div>
                   <p className="text-[11px] text-[var(--color-mist-400)] leading-relaxed">
-                    Cryptographically hashed, court-admissible audit package formatted for NGT and State Pollution Control Board enforcement proceedings.
+                    Instant 1-click verified evidence report for authorities, municipal teams, and public health action.
                   </p>
                 </div>
               </div>
@@ -405,7 +405,7 @@ export default function EvidencePanel({ h3Cell, hotspot, onClose }) {
                 className="mt-3 w-full flex items-center justify-center gap-2 rounded-xl bg-[#6366f1] px-4 py-2.5 text-xs font-semibold text-white hover:bg-[#4f46e5] transition-colors shadow-sm cursor-pointer"
               >
                 <FileCheck size={14} />
-                <span>Export NGT / SPCB Evidence Dossier (PDF)</span>
+                <span>Export Incident Report (PDF)</span>
               </button>
             </div>
           </div>
@@ -489,9 +489,9 @@ function ForecastChart({ forecast }) {
   );
 }
 
-/* ── Court-Admissible Statutory Evidence Dossier Modal ── */
+/* ── Official Incident Report Modal (Multi-Source Evidence Report) ── */
 function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence, sev, onClose }) {
-  const dossierId = useMemo(() => `NGT-ENV-2026-${(h3Cell || "873DA1").slice(-6).toUpperCase()}`, [h3Cell]);
+  const reportId = useMemo(() => `AGR-REP-2026-${(h3Cell || "873DA1").slice(-6).toUpperCase()}`, [h3Cell]);
   const shaHash = useMemo(() => {
     const raw = `${h3Cell}-${data?.lat}-${data?.lng}-${confidence}`;
     let h = 0x811c9dc5;
@@ -541,7 +541,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AirGrid_Statutory_Dossier_${dossierId}</title>
+  <title>AirGrid_Incident_Report_${reportId}</title>
   <style>
     @page { size: A4 portrait; margin: 12mm 15mm 12mm 15mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
@@ -556,7 +556,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
     }
     @media print { body { padding: 0; } }
     .header-bar { border-bottom: 2px solid #0f172a; padding-bottom: 10px; text-align: center; margin-bottom: 12px; }
-    .gov-title { font-size: 13.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #020617; margin: 0 0 2px 0; }
+    .gov-title { font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #020617; margin: 0 0 2px 0; }
     .gov-sub { font-size: 9.5px; font-weight: 600; text-transform: uppercase; color: #475569; margin: 0 0 4px 0; }
     .gov-badge { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 4px; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
     .meta-box { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 10px; }
@@ -580,21 +580,21 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
 </head>
 <body>
   <div class="header-bar">
-    <h1 class="gov-title">NATIONAL GREEN TRIBUNAL & STATE POLLUTION CONTROL BOARD</h1>
-    <p class="gov-sub">Environmental Audit & Statutory Enforcement Division · Section 21 & 31A Air Act 1981</p>
-    <span class="gov-badge">Official Statutory Inspection Notice & Evidence Dossier</span>
+    <h1 class="gov-title">AIRGRID — OFFICIAL POLLUTION INCIDENT REPORT</h1>
+    <p class="gov-sub">Autonomous Multi-Source Environmental Intelligence & Impact Assessment</p>
+    <span class="gov-badge">Verified Evidence Report for Regulatory & Municipal Action</span>
   </div>
 
   <div class="meta-box">
-    <div><strong>DOSSIER REF:</strong> ${dossierId}</div>
+    <div><strong>REPORT ID:</strong> ${reportId}</div>
     <div style="text-align: right;"><strong>DATE & TIME (IST):</strong> ${istTime}</div>
     <div style="grid-column: span 2; font-family: monospace; font-size: 9px; word-break: break-all;">
-      <strong>INTEGRITY HASH:</strong> ${shaHash} (Sec 65B Indian Evidence Act compliant)
+      <strong>DIGITAL VERIFICATION HASH:</strong> ${shaHash} (Sec 65B Indian Evidence Act compliant)
     </div>
   </div>
 
   <div class="subject-box">
-    SUBJECT: NOTICE OF UNMONITORED AIR POLLUTION DISPERSION & DOWNWIND PUBLIC HEALTH EXPOSURE IN ${placeName.toUpperCase()}
+    SUBJECT: UNMONITORED AIR POLLUTION DISPERSION & DOWNWIND EXPOSURE REPORT — ${placeName.toUpperCase()}
   </div>
 
   <div class="sec-h">1.0 Executive Summary & Sensor Blindspot Finding</div>
@@ -696,14 +696,14 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
 
   <div class="attest-bar">
     <div style="max-width: 60%; font-size: 8.5px; color: #64748b; line-height: 1.4;">
-      <strong>STATUTORY CERTIFICATE OF TECHNICAL VERACITY</strong><br />
+      <strong>TECHNICAL VERIFICATION & AUDIT ATTESTATION</strong><br />
       This document contains algorithmic forensic evidence synthesized from calibrated satellite telemetry, meteorological models, and ground citizen verification. Authenticated under Section 65B of the Indian Evidence Act, 1872.
     </div>
     <div class="seal-wrap">
       <div class="seal-icon">SEAL</div>
       <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #0f172a;">Inspecting Environmental Officer</div>
       <div style="font-size: 8px; color: #64748b;">Municipal Enforcement Division</div>
-      <div style="font-size: 7.5px; font-family: monospace; color: #4338ca; margin-top: 2px;">AIRGRID-VERIFIED-AUDIT</div>
+      <div style="font-size: 7.5px; font-family: monospace; color: #4338ca; margin-top: 2px;">AIRGRID-VERIFIED-REPORT</div>
     </div>
   </div>
 </body>
@@ -739,13 +739,13 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
       const link = document.createElement("a");
       const safePlace = (placeName || "Incident").replace(/[^a-zA-Z0-9]/g, "_");
       link.href = url;
-      link.download = `Statutory_Dossier_${safePlace}_${dossierId}.html`;
+      link.download = `AirGrid_Incident_Report_${safePlace}_${reportId}.html`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (e) {
-      console.error("Failed to download dossier", e);
+      console.error("Failed to download report", e);
     }
   };
 
@@ -762,11 +762,11 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-3.5 print:hidden">
           <div className="flex items-center gap-2.5">
             <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold text-xs shadow-sm">
-              NGT
+              AGR
             </span>
             <div>
-              <p className="text-xs font-bold text-slate-900">Statutory Incident Evidence Draft</p>
-              <p className="text-[10px] text-slate-500">Admissible under Sec 65B Indian Evidence Act</p>
+              <p className="text-xs font-bold text-slate-900">Official Incident Report</p>
+              <p className="text-[10px] text-slate-500">Autonomous multi-source evidence summary</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -774,10 +774,10 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               type="button"
               onClick={handleDownload}
               className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors shadow-sm cursor-pointer"
-              title="Download standalone draft HTML file to keep, share, or edit"
+              title="Download standalone report HTML file to keep, share, or edit"
             >
               <Download size={13} className="text-indigo-600" />
-              <span>Download Draft (.html)</span>
+              <span>Download Report (.html)</span>
             </button>
             <button
               type="button"
@@ -805,33 +805,33 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
             <div className="inline-flex items-center justify-center gap-2 mb-1">
               <Shield size={18} className="text-slate-900" />
               <h1 className="text-sm sm:text-base font-extrabold tracking-wider uppercase text-slate-950 font-sans">
-                NATIONAL GREEN TRIBUNAL & STATE POLLUTION CONTROL BOARD
+                AIRGRID — OFFICIAL POLLUTION INCIDENT REPORT
               </h1>
             </div>
             <p className="text-[11px] font-semibold tracking-wide text-slate-700 uppercase">
-              Environmental Audit & Statutory Enforcement Division · Section 21 & 31A Air Act 1981
+              Autonomous Multi-Source Environmental Intelligence & Impact Assessment
             </p>
             <span className="inline-block mt-1 rounded bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900 uppercase tracking-wider border border-indigo-200">
-              Official Statutory Inspection Notice & Evidence Dossier
+              Verified Evidence Report for Regulatory & Municipal Action
             </span>
           </div>
 
-          {/* Dossier Meta Bar */}
+          {/* Report Meta Bar */}
           <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5 text-xs font-sans">
             <div>
-              <span className="text-slate-500 font-medium">DOSSIER REF:</span> <strong className="text-slate-900">{dossierId}</strong>
+              <span className="text-slate-500 font-medium">REPORT ID:</span> <strong className="text-slate-900">{reportId}</strong>
             </div>
             <div className="text-right">
               <span className="text-slate-500 font-medium">DATE (IST):</span> <strong className="text-slate-900">{istTime}</strong>
             </div>
             <div className="col-span-2 text-[10px] text-slate-700 truncate font-mono">
-              <span className="text-slate-500 font-sans font-medium">INTEGRITY HASH:</span> <span className="font-semibold text-slate-800">{shaHash}</span>
+              <span className="text-slate-500 font-sans font-medium">DIGITAL HASH:</span> <span className="font-semibold text-slate-800">{shaHash}</span>
             </div>
           </div>
 
           {/* Subject Bar */}
           <div className="rounded-lg border-l-4 border-indigo-600 bg-slate-100 p-2.5 text-xs font-semibold uppercase text-slate-900">
-            SUBJECT: STATUTORY NOTICE & FORENSIC EVIDENCE BUNDLE — UNMONITORED AIR POLLUTION DISPERSION OVER {placeName.toUpperCase()}
+            SUBJECT: UNMONITORED AIR POLLUTION DISPERSION & DOWNWIND EXPOSURE REPORT — {placeName.toUpperCase()}
           </div>
 
           {/* Section 1: Plain English Summary & Blindspot Finding */}
