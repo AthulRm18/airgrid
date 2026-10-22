@@ -594,229 +594,6 @@ function classifyNAQI({ aqi, pm25 }) {
   };
 }
 
-/* ── Inline SVG Spatial Plume & Coverage Gap Vector Graphic ── */
-function SpatialPlumeMap({
-  lat,
-  lng,
-  h3Cell,
-  windSpeed,
-  windDir,
-  corridorSchools,
-  corridorHospitals,
-  corridorPop,
-  corridorCells,
-}) {
-  const downwindDeg = (windDir + 180) % 360;
-  const rad = ((downwindDeg - 90) * Math.PI) / 180;
-  const vx = Math.cos(rad);
-  const vy = Math.sin(rad);
-  const px = -vy;
-  const py = vx;
-
-  const sx = 230;
-  const sy = 135;
-
-  const n1x = (sx + 85 * vx - 22 * px).toFixed(1);
-  const n1y = (sy + 85 * vy - 22 * py).toFixed(1);
-  const n2x = (sx + 85 * vx + 22 * px).toFixed(1);
-  const n2y = (sy + 85 * vy + 22 * py).toFixed(1);
-
-  const m1x = (sx + 185 * vx - 46 * px).toFixed(1);
-  const m1y = (sy + 185 * vy - 46 * py).toFixed(1);
-  const m2x = (sx + 185 * vx + 46 * px).toFixed(1);
-  const m2y = (sy + 185 * vy + 46 * py).toFixed(1);
-
-  const f1x = (sx + 295 * vx - 72 * px).toFixed(1);
-  const f1y = (sy + 295 * vy - 72 * py).toFixed(1);
-  const f2x = (sx + 295 * vx + 72 * px).toFixed(1);
-  const f2y = (sy + 295 * vy + 72 * py).toFixed(1);
-
-  const cx = 85;
-  const cy = 75;
-
-  return (
-    <svg
-      viewBox="0 0 720 270"
-      width="100%"
-      height="270"
-      className="w-full h-auto rounded-xl border border-slate-200 bg-[#f8fafc]"
-      style={{ display: "block", maxWidth: "100%" }}
-    >
-      <defs>
-        <pattern id="gridPatternModal" width="30" height="30" patternUnits="userSpaceOnUse">
-          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#e2e8f0" strokeWidth="0.8" strokeDasharray="3 3" />
-        </pattern>
-        <linearGradient id="plumeNearModal" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#ef4444" stopOpacity="0.5" />
-          <stop offset="100%" stopColor="#f97316" stopOpacity="0.35" />
-        </linearGradient>
-        <linearGradient id="plumeMidModal" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f97316" stopOpacity="0.3" />
-          <stop offset="100%" stopColor="#eab308" stopOpacity="0.2" />
-        </linearGradient>
-        <linearGradient id="plumeFarModal" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#eab308" stopOpacity="0.18" />
-          <stop offset="100%" stopColor="#ca8a04" stopOpacity="0.08" />
-        </linearGradient>
-      </defs>
-      <rect width="720" height="270" fill="url(#gridPatternModal)" />
-
-      {/* Sector 3: 8-12h Extended Plume */}
-      <polygon
-        points={`${m1x},${m1y} ${f1x},${f1y} ${f2x},${f2y} ${m2x},${m2y}`}
-        fill="url(#plumeFarModal)"
-        stroke="#ca8a04"
-        strokeWidth="1.2"
-        strokeDasharray="4 3"
-      />
-
-      {/* Sector 2: 4-8h Mid Dispersion Plume */}
-      <polygon
-        points={`${n1x},${n1y} ${m1x},${m1y} ${m2x},${m2y} ${n2x},${n2y}`}
-        fill="url(#plumeMidModal)"
-        stroke="#ea580c"
-        strokeWidth="1.4"
-      />
-
-      {/* Sector 1: 0-4h Near-Source Plume */}
-      <polygon
-        points={`${sx},${sy} ${n1x},${n1y} ${n2x},${n2y}`}
-        fill="url(#plumeNearModal)"
-        stroke="#dc2626"
-        strokeWidth="1.5"
-      />
-
-      {/* Plume Centerline Dispersion Trajectory */}
-      <line
-        x1={sx}
-        y1={sy}
-        x2={(sx + 305 * vx).toFixed(1)}
-        y2={(sy + 305 * vy).toFixed(1)}
-        stroke="#b91c1c"
-        strokeWidth="1.5"
-        strokeDasharray="5 3"
-      />
-
-      {/* Distance to Official CAAQMS Station (Blindspot Gap Vector) */}
-      <line
-        x1={cx}
-        y1={cy}
-        x2={sx}
-        y2={sy}
-        stroke="#0284c7"
-        strokeWidth="1.5"
-        strokeDasharray="4 4"
-      />
-      <rect
-        x={(cx + sx) / 2 - 58}
-        y={(cy + sy) / 2 - 10}
-        width="116"
-        height="18"
-        rx="4"
-        fill="#ffffff"
-        stroke="#0284c7"
-        strokeWidth="1"
-      />
-      <text
-        x={(cx + sx) / 2}
-        y={(cy + sy) / 2 + 3}
-        textAnchor="middle"
-        fill="#0369a1"
-        fontSize="9"
-        fontWeight="700"
-      >
-        8.4 km Monitoring Gap
-      </text>
-
-      {/* Official CAAQMS Station Marker */}
-      <circle cx={cx} cy={cy} r="14" fill="#e0f2fe" stroke="#0284c7" strokeWidth="1.8" />
-      <circle cx={cx} cy={cy} r="6" fill="#0284c7" />
-      <text x={cx} y={cy + 25} textAnchor="middle" fill="#0f172a" fontSize="9.5" fontWeight="700">
-        Official CAAQMS Monitor
-      </text>
-      <text x={cx} y={cy + 36} textAnchor="middle" fill="#64748b" fontSize="8">
-        Normal Baseline · Blindspot
-      </text>
-
-      {/* Incident Source Hotspot (H3 Hexagon) */}
-      <g transform={`translate(${sx}, ${sy})`}>
-        <polygon
-          points="26,0 13,22.5 -13,22.5 -26,0 -13,-22.5 13,-22.5"
-          fill="#fee2e2"
-          stroke="#dc2626"
-          strokeWidth="2.2"
-        />
-        <circle cx="0" cy="0" r="8" fill="#dc2626" />
-        <circle cx="0" cy="0" r="3.5" fill="#ffffff" />
-      </g>
-      <text x={sx} y={sy - 28} textAnchor="middle" fill="#991b1b" fontSize="10" fontWeight="800">
-        HOTSPOT SOURCE ({h3Cell.slice(-6).toUpperCase()})
-      </text>
-      <text x={sx} y={sy - 17} textAnchor="middle" fill="#64748b" fontSize="8.5">
-        {lat}° N, {lng}° E · H3 Res 7
-      </text>
-
-      {/* Downwind Sensitive Receptors Annotations */}
-      <g transform={`translate(${(sx + 135 * vx).toFixed(1)}, ${(sy + 135 * vy - 12).toFixed(1)})`}>
-        <rect x="-44" y="-12" width="88" height="20" rx="4" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
-        <text x="0" y="2" textAnchor="middle" fill="#b45309" fontSize="8.5" fontWeight="700">
-          {corridorSchools} Schools in Path
-        </text>
-      </g>
-      <g transform={`translate(${(sx + 225 * vx).toFixed(1)}, ${(sy + 225 * vy + 12).toFixed(1)})`}>
-        <rect x="-48" y="-12" width="96" height="20" rx="4" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
-        <text x="0" y="2" textAnchor="middle" fill="#b91c1c" fontSize="8.5" fontWeight="700">
-          {corridorHospitals} Hospitals / Clinics
-        </text>
-      </g>
-
-      {/* Wind Vector Banner */}
-      <g transform="translate(560, 26)">
-        <rect x="-65" y="-14" width="130" height="26" rx="6" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
-        <text x="0" y="3" textAnchor="middle" fill="#0f172a" fontSize="9.5" fontWeight="700">
-          Wind: {windSpeed} km/h @ {windDir}°
-        </text>
-      </g>
-
-      {/* North Compass Arrow */}
-      <g transform="translate(685, 30)">
-        <circle cx="0" cy="0" r="14" fill="#ffffff" stroke="#94a3b8" strokeWidth="1" />
-        <path d="M 0 -11 L 3.5 2 L 0 0 L -3.5 2 Z" fill="#dc2626" />
-        <path d="M 0 11 L 3.5 0 L 0 2 L -3.5 0 Z" fill="#64748b" />
-        <text x="0" y="-14" textAnchor="middle" fill="#0f172a" fontSize="8" fontWeight="800">N</text>
-      </g>
-
-      {/* Scale Bar (Bottom Left) */}
-      <g transform="translate(24, 240)">
-        <rect x="-4" y="-12" width="98" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1" strokeWidth="0.8" />
-        <line x1="8" y1="0" x2="82" y2="0" stroke="#0f172a" strokeWidth="1.5" />
-        <line x1="8" y1="-4" x2="8" y2="4" stroke="#0f172a" strokeWidth="1.5" />
-        <line x1="45" y1="-3" x2="45" y2="3" stroke="#0f172a" strokeWidth="1" />
-        <line x1="82" y1="-4" x2="82" y2="4" stroke="#0f172a" strokeWidth="1.5" />
-        <text x="8" y="-5" fill="#64748b" fontSize="7.5">0</text>
-        <text x="45" y="-5" textAnchor="middle" fill="#64748b" fontSize="7.5">2.5</text>
-        <text x="82" y="-5" textAnchor="middle" fill="#0f172a" fontSize="7.5" fontWeight="700">5 km</text>
-      </g>
-
-      {/* Map Legend (Bottom Strip) */}
-      <g transform="translate(135, 244)">
-        <rect x="0" y="-14" width="560" height="24" rx="5" fill="#ffffff" stroke="#e2e8f0" strokeWidth="1" />
-        <circle cx="16" cy="-2" r="5" fill="#dc2626" />
-        <text x="26" y="1" fill="#1e293b" fontSize="8.5" fontWeight="600">Incident Source (H3 Hex)</text>
-
-        <rect x="156" y="-6" width="16" height="8" rx="2" fill="#f97316" fillOpacity="0.4" stroke="#ea580c" strokeWidth="1" />
-        <text x="178" y="1" fill="#1e293b" fontSize="8.5" fontWeight="600">12h Downwind Plume Corridor</text>
-
-        <circle cx="340" cy="-2" r="5" fill="#0284c7" />
-        <text x="350" y="1" fill="#1e293b" fontSize="8.5" fontWeight="600">Official CAAQMS Monitor (8.4 km Gap)</text>
-
-        <rect x="502" y="-6" width="10" height="8" rx="1" fill="#fee2e2" stroke="#dc2626" strokeWidth="1" />
-        <text x="516" y="1" fill="#1e293b" fontSize="8.5" fontWeight="600">Receptors</text>
-      </g>
-    </svg>
-  );
-}
-
 /* ── Production Air Quality Incident Report Modal & Print Engine ── */
 function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence, sev, onClose }) {
   // Global Escape key listener to guarantee immediate modal closure
@@ -876,108 +653,84 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
 
   // Standalone production-grade HTML document for vector printing and offline distribution
   const generateFullHtml = () => {
-    const downwindDeg = (windDir + 180) % 360;
-    const rad = ((downwindDeg - 90) * Math.PI) / 180;
-    const vx = Math.cos(rad);
-    const vy = Math.sin(rad);
-    const px = -vy;
-    const py = vx;
-
-    const sx = 230;
-    const sy = 135;
-
-    const n1x = (sx + 85 * vx - 22 * px).toFixed(1);
-    const n1y = (sy + 85 * vy - 22 * py).toFixed(1);
-    const n2x = (sx + 85 * vx + 22 * px).toFixed(1);
-    const n2y = (sy + 85 * vy + 22 * py).toFixed(1);
-
-    const m1x = (sx + 185 * vx - 46 * px).toFixed(1);
-    const m1y = (sy + 185 * vy - 46 * py).toFixed(1);
-    const m2x = (sx + 185 * vx + 46 * px).toFixed(1);
-    const m2y = (sy + 185 * vy + 46 * py).toFixed(1);
-
-    const f1x = (sx + 295 * vx - 72 * px).toFixed(1);
-    const f1y = (sy + 295 * vy - 72 * py).toFixed(1);
-    const f2x = (sx + 295 * vx + 72 * px).toFixed(1);
-    const f2y = (sy + 295 * vy + 72 * py).toFixed(1);
-
-    const cx = 85;
-    const cy = 75;
-
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>AirGrid_Incident_Report_${reportId}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     @page {
       size: A4 portrait;
-      margin: 16mm 14mm 16mm 14mm;
+      margin: 15mm 14mm 15mm 14mm;
     }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: 'Manrope', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: #0f172a;
       background: #ffffff;
       margin: 0;
       padding: 24px;
-      font-size: 10.5px;
-      line-height: 1.5;
+      font-size: 11px;
+      line-height: 1.55;
     }
     @media print {
       body { padding: 0; }
       .page-break-avoid { break-inside: avoid !important; page-break-inside: avoid !important; }
       .page-break-before { break-before: page !important; page-break-before: always !important; }
     }
-    .top-bar { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; }
+    .top-bar { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 14px; }
     .brand-title { font-size: 18px; font-weight: 800; color: #0f172a; letter-spacing: -0.4px; }
     .brand-sub { font-size: 9.5px; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 1px; }
     .meta-tags { display: flex; gap: 6px; font-size: 8.5px; font-weight: 600; color: #334155; }
     .tag { background: #f8fafc; padding: 2px 7px; border-radius: 4px; border: 1px solid #cbd5e1; }
     .tag-alert { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
 
-    .header-block { margin-bottom: 12px; }
-    .doc-title { font-size: 19px; font-weight: 800; color: #020617; margin: 0 0 2px 0; letter-spacing: -0.3px; }
-    .doc-sub { font-size: 11px; color: #475569; margin: 0 0 6px 0; font-weight: 500; }
+    .header-block { margin-bottom: 14px; }
+    .doc-title { font-size: 20px; font-weight: 800; color: #020617; margin: 0 0 2px 0; letter-spacing: -0.4px; }
+    .doc-sub { font-size: 11.5px; color: #475569; margin: 0 0 8px 0; font-weight: 500; }
     .pills { display: flex; flex-wrap: wrap; gap: 6px; }
-    .pill { font-size: 8.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px; }
+    .pill { font-size: 8.5px; font-weight: 700; padding: 2.5px 8px; border-radius: 999px; }
     .pill-naqi { background: ${naqiData.badgeBg}; color: ${naqiData.badgeColor}; border: 1px solid ${naqiData.badgeBorder}; }
     .pill-blue { background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; }
     .pill-gray { background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0; }
 
-    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
-    .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; }
-    .kpi-h { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 2px; letter-spacing: 0.3px; }
-    .kpi-v { font-size: 17px; font-weight: 800; color: #0f172a; line-height: 1.1; margin-bottom: 1px; }
-    .kpi-n { font-size: 8.5px; color: #64748b; line-height: 1.25; }
+    .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .kpi { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; }
+    .kpi-h { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #64748b; margin-bottom: 2px; letter-spacing: 0.4px; }
+    .kpi-v { font-size: 18px; font-weight: 800; color: #0f172a; line-height: 1.1; margin-bottom: 2px; }
+    .kpi-n { font-size: 8.5px; color: #64748b; line-height: 1.3; }
 
-    .sec-header { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #0f172a; margin: 12px 0 6px 0; display: flex; align-items: center; gap: 6px; }
+    .sec-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: #0f172a; margin: 14px 0 6px 0; display: flex; align-items: center; gap: 6px; }
     .sec-header::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #0d9488; }
 
-    .summary-box { background: #f8fafc; border: 1px solid #cbd5e1; border-left: 3.5px solid #0d9488; border-radius: 6px; padding: 9px 12px; font-size: 10.5px; color: #1e293b; line-height: 1.55; margin-bottom: 10px; }
+    .summary-box { background: #f8fafc; border: 1px solid #cbd5e1; border-left: 3.5px solid #0d9488; border-radius: 6px; padding: 10px 14px; font-size: 11px; color: #1e293b; line-height: 1.6; margin-bottom: 12px; }
 
-    .map-container { margin: 10px 0 12px 0; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+    .compare-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 9px 12px; background: #ffffff; }
+    .compare-title { font-size: 9.5px; font-weight: 700; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.3px; }
 
-    .ev-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
-    .ev-card { border: 1px solid #e2e8f0; background: #ffffff; border-radius: 6px; padding: 8px 10px; }
+    .ev-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 12px; }
+    .ev-card { border: 1px solid #e2e8f0; background: #ffffff; border-radius: 6px; padding: 9px 11px; }
     .ev-tag { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #475569; margin-bottom: 2px; }
-    .ev-val { font-size: 12.5px; font-weight: 800; color: #0f172a; margin-bottom: 2px; }
-    .ev-desc { font-size: 9px; color: #475569; line-height: 1.35; }
-    .ev-limit { font-size: 8.5px; color: #64748b; font-style: italic; margin-top: 3px; border-top: 1px dashed #e2e8f0; padding-top: 2px; }
+    .ev-val { font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 3px; }
+    .ev-desc { font-size: 9.5px; color: #475569; line-height: 1.4; }
 
-    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 9.5px; }
-    th, td { border: 1px solid #e2e8f0; padding: 5px 8px; text-align: left; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10px; }
+    th, td { border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }
     th { background: #f8fafc; font-weight: 700; color: #334155; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.3px; }
 
-    .actions-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 9.5px; }
-    .actions-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; font-size: 8.5px; padding: 5px 8px; border: 1px solid #cbd5e1; }
-    .actions-table td { padding: 5px 8px; border: 1px solid #e2e8f0; vertical-align: top; }
+    .actions-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; font-size: 10px; }
+    .actions-table th { background: #f1f5f9; color: #0f172a; font-weight: 700; font-size: 8.5px; padding: 6px 10px; border: 1px solid #cbd5e1; }
+    .actions-table td { padding: 6px 10px; border: 1px solid #e2e8f0; vertical-align: top; }
 
-    .provenance-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; font-size: 8.5px; color: #475569; margin-bottom: 10px; }
+    .provenance-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; font-size: 9px; color: #475569; margin-bottom: 12px; }
     .provenance-item { display: flex; flex-direction: column; }
     .provenance-label { font-weight: 700; color: #1e293b; text-transform: uppercase; font-size: 7.5px; margin-bottom: 1px; }
 
-    .footer { border-top: 1px solid #cbd5e1; padding-top: 8px; margin-top: 10px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #64748b; page-break-inside: avoid; }
+    .footer { border-top: 1px solid #cbd5e1; padding-top: 8px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 8.5px; color: #64748b; page-break-inside: avoid; }
     .audit-seal { display: inline-flex; align-items: center; gap: 5px; background: #f8fafc; border: 1px solid #cbd5e1; padding: 2px 7px; border-radius: 4px; font-weight: 700; color: #1e293b; font-size: 8px; }
   </style>
 </head>
@@ -1014,7 +767,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
     <div class="kpi">
       <div class="kpi-h">Aerosol Column Surge</div>
       <div class="kpi-v" style="color: #b91c1c;">+142%</div>
-      <div class="kpi-n">Sentinel-5P AOD above 14-day baseline</div>
+      <div class="kpi-n">Sentinel-5P AOD vs 14-day baseline</div>
     </div>
     <div class="kpi">
       <div class="kpi-h">Corridor Population</div>
@@ -1028,136 +781,50 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
     </div>
   </div>
 
-  <div class="sec-header">1. Executive Summary</div>
+  <div class="sec-header">Executive Summary</div>
   <div class="summary-box">
     An acute localized air quality incident has formed over <strong>${placeName}</strong> (Coordinates: ${lat}° N, ${lng}° E).
-    The nearest official regulatory monitoring station (CAAQMS) is located <strong>8.4 km away</strong> and recorded baseline normal values, leaving this localized event completely unmonitored by standard government networks.
-    AirGrid autonomous multi-source fusion detected an active particulate plume moving downwind, placing surrounding residential sectors, <strong>${corridorSchools} schools</strong>, and <strong>${corridorHospitals} medical facilities</strong> in the projected exposure corridor.
-    <em>${naqiData.healthGuidance}</em>
+    The nearest official regulatory monitoring station (CAAQMS) is located <strong>8.4 km away</strong> and recorded baseline normal readings, leaving this localized high-emission event completely invisible to standard government networks.
+    AirGrid autonomous multi-source fusion detected the active smoke plume traveling downwind, placing surrounding residential communities, <strong>${corridorSchools} schools</strong>, and <strong>${corridorHospitals} medical facilities</strong> in the projected exposure corridor.
+    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #475569; font-style: italic;">
+      Health Guidance: ${naqiData.healthGuidance}
+    </div>
   </div>
 
-  <div class="sec-header page-break-avoid">2. Spatial Dispersion & Regulatory Sensor Gap</div>
-  <div class="map-container page-break-avoid">
-    <svg viewBox="0 0 720 270" width="100%" height="270" style="display:block; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc;">
-      <defs>
-        <pattern id="gridPatternPrint" width="30" height="30" patternUnits="userSpaceOnUse">
-          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#e2e8f0" stroke-width="0.8" stroke-dasharray="3 3" />
-        </pattern>
-        <linearGradient id="plumeNearPrint" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#ef4444" stop-opacity="0.5" />
-          <stop offset="100%" stop-color="#f97316" stop-opacity="0.35" />
-        </linearGradient>
-        <linearGradient id="plumeMidPrint" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#f97316" stop-opacity="0.3" />
-          <stop offset="100%" stop-color="#eab308" stop-opacity="0.2" />
-        </linearGradient>
-        <linearGradient id="plumeFarPrint" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#eab308" stop-opacity="0.18" />
-          <stop offset="100%" stop-color="#ca8a04" stop-opacity="0.08" />
-        </linearGradient>
-      </defs>
-      <rect width="720" height="270" fill="url(#gridPatternPrint)" />
-
-      <polygon points="${m1x},${m1y} ${f1x},${f1y} ${f2x},${f2y} ${m2x},${m2y}" fill="url(#plumeFarPrint)" stroke="#ca8a04" stroke-width="1.2" stroke-dasharray="4 3" />
-      <polygon points="${n1x},${n1y} ${m1x},${m1y} ${m2x},${m2y} ${n2x},${n2y}" fill="url(#plumeMidPrint)" stroke="#ea580c" stroke-width="1.4" />
-      <polygon points="${sx},${sy} ${n1x},${n1y} ${n2x},${n2y}" fill="url(#plumeNearPrint)" stroke="#dc2626" stroke-width="1.5" />
-      <line x1="${sx}" y1="${sy}" x2="${(sx + 305 * vx).toFixed(1)}" y2="${(sy + 305 * vy).toFixed(1)}" stroke="#b91c1c" stroke-width="1.5" stroke-dasharray="5 3" />
-
-      <line x1="${cx}" y1="${cy}" x2="${sx}" y2="${sy}" stroke="#0284c7" stroke-width="1.5" stroke-dasharray="4 4" />
-      <rect x="${(cx + sx) / 2 - 58}" y="${(cy + sy) / 2 - 10}" width="116" height="18" rx="4" fill="#ffffff" stroke="#0284c7" stroke-width="1" />
-      <text x="${(cx + sx) / 2}" y="${(cy + sy) / 2 + 3}" text-anchor="middle" fill="#0369a1" font-size="9" font-weight="700">8.4 km Monitoring Gap</text>
-
-      <circle cx="${cx}" cy="${cy}" r="14" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.8" />
-      <circle cx="${cx}" cy="${cy}" r="6" fill="#0284c7" />
-      <text x="${cx}" y="${cy + 25}" text-anchor="middle" fill="#0f172a" font-size="9.5" font-weight="700">Official CAAQMS Monitor</text>
-      <text x="${cx}" y="${cy + 36}" text-anchor="middle" fill="#64748b" font-size="8">Normal Baseline · Blindspot</text>
-
-      <g transform="translate(${sx}, ${sy})">
-        <polygon points="26,0 13,22.5 -13,22.5 -26,0 -13,-22.5 13,-22.5" fill="#fee2e2" stroke="#dc2626" stroke-width="2.2" />
-        <circle cx="0" cy="0" r="8" fill="#dc2626" />
-        <circle cx="0" cy="0" r="3.5" fill="#ffffff" />
-      </g>
-      <text x="${sx}" y="${sy - 28}" text-anchor="middle" fill="#991b1b" font-size="10" font-weight="800">HOTSPOT SOURCE (${h3Cell.slice(-6).toUpperCase()})</text>
-      <text x="${sx}" y="${sy - 17}" text-anchor="middle" fill="#64748b" font-size="8.5">${lat}° N, ${lng}° E · H3 Res 7</text>
-
-      <g transform="translate(${(sx + 135 * vx).toFixed(1)}, ${(sy + 135 * vy - 12).toFixed(1)})">
-        <rect x="-44" y="-12" width="88" height="20" rx="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
-        <text x="0" y="2" text-anchor="middle" fill="#b45309" font-size="8.5" font-weight="700">${corridorSchools} Schools in Path</text>
-      </g>
-      <g transform="translate(${(sx + 225 * vx).toFixed(1)}, ${(sy + 225 * vy + 12).toFixed(1)})">
-        <rect x="-48" y="-12" width="96" height="20" rx="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
-        <text x="0" y="2" text-anchor="middle" fill="#b91c1c" font-size="8.5" font-weight="700">${corridorHospitals} Hospitals / Clinics</text>
-      </g>
-
-      <g transform="translate(560, 26)">
-        <rect x="-65" y="-14" width="130" height="26" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1" />
-        <text x="0" y="3" text-anchor="middle" fill="#0f172a" font-size="9.5" font-weight="700">Wind: ${windSpeed} km/h @ ${windDir}°</text>
-      </g>
-
-      <g transform="translate(685, 30)">
-        <circle cx="0" cy="0" r="14" fill="#ffffff" stroke="#94a3b8" stroke-width="1" />
-        <path d="M 0 -11 L 3.5 2 L 0 0 L -3.5 2 Z" fill="#dc2626" />
-        <path d="M 0 11 L 3.5 0 L 0 2 L -3.5 0 Z" fill="#64748b" />
-        <text x="0" y="-14" text-anchor="middle" fill="#0f172a" font-size="8" font-weight="800">N</text>
-      </g>
-
-      <g transform="translate(24, 240)">
-        <rect x="-4" y="-12" width="98" height="22" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="0.8" />
-        <line x1="8" y1="0" x2="82" y2="0" stroke="#0f172a" stroke-width="1.5" />
-        <line x1="8" y1="-4" x2="8" y2="4" stroke="#0f172a" stroke-width="1.5" />
-        <line x1="45" y1="-3" x2="45" y2="3" stroke="#0f172a" stroke-width="1" />
-        <line x1="82" y1="-4" x2="82" y2="4" stroke="#0f172a" stroke-width="1.5" />
-        <text x="8" y="-5" fill="#64748b" font-size="7.5">0</text>
-        <text x="45" y="-5" text-anchor="middle" fill="#64748b" font-size="7.5">2.5</text>
-        <text x="82" y="-5" text-anchor="middle" fill="#0f172a" font-size="7.5" font-weight="700">5 km</text>
-      </g>
-
-      <g transform="translate(135, 244)">
-        <rect x="0" y="-14" width="560" height="24" rx="5" fill="#ffffff" stroke="#e2e8f0" stroke-width="1" />
-        <circle cx="16" cy="-2" r="5" fill="#dc2626" />
-        <text x="26" y="1" fill="#1e293b" font-size="8.5" font-weight="600">Incident Source (H3 Hex)</text>
-
-        <rect x="156" y="-6" width="16" height="8" rx="2" fill="#f97316" fill-opacity="0.4" stroke="#ea580c" stroke-width="1" />
-        <text x="178" y="1" fill="#1e293b" font-size="8.5" font-weight="600">12h Downwind Plume Corridor</text>
-
-        <circle cx="340" cy="-2" r="5" fill="#0284c7" />
-        <text x="350" y="1" fill="#1e293b" font-size="8.5" font-weight="600">Official CAAQMS Monitor (8.4 km Gap)</text>
-
-        <rect x="502" y="-6" width="10" height="8" rx="1" fill="#fee2e2" stroke="#dc2626" stroke-width="1" />
-        <text x="516" y="1" fill="#1e293b" font-size="8.5" font-weight="600">Receptors</text>
-      </g>
-    </svg>
+  <div class="sec-header page-break-avoid">Monitoring Coverage Gap (Why Official Monitors Missed It)</div>
+  <div class="compare-grid page-break-avoid">
+    <div class="compare-card" style="border-left: 3.5px solid #dc2626;">
+      <div class="compare-title" style="color: #991b1b;">Official CAAQMS Station (8.4 km away)</div>
+      <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-bottom: 2px;">Normal Baseline · Zero Alert Triggered</div>
+      <div style="font-size: 9.5px; color: #64748b; line-height: 1.4;">The regulatory ground station is located out of range of this localized emission plume.</div>
+    </div>
+    <div class="compare-card" style="border-left: 3.5px solid #16a34a;">
+      <div class="compare-title" style="color: #15803d;">AirGrid Multi-Source Intelligence</div>
+      <div style="font-size: 11px; font-weight: 700; color: #0f172a; margin-bottom: 2px;">Active Plume Detected at Source</div>
+      <div style="font-size: 9.5px; color: #64748b; line-height: 1.4;">Fused orbital satellite aerosol telemetry with ground citizen complaint clusters in real-time.</div>
+    </div>
   </div>
 
-  <div class="sec-header page-break-avoid">3. Corroborated Multi-Source Evidence Matrix</div>
+  <div class="sec-header page-break-avoid">Corroborated Multi-Source Evidence</div>
   <div class="ev-grid page-break-avoid">
     <div class="ev-card" style="border-top: 3px solid #0d9488;">
-      <div class="ev-tag">Satellite Tropospheric Telemetry</div>
-      <div class="ev-val">+142% Aerosol Optical Surge</div>
-      <div class="ev-desc">Sentinel-5P TROPOMI recorded +142% aerosol optical depth above the 14-day historical baseline across cell ${h3Cell.slice(-6).toUpperCase()}.</div>
-      <div class="ev-limit">Resolution: 5.5 × 3.5 km. Measures total atmospheric column loading; ground PM2.5 derived through atmospheric model.</div>
+      <div class="ev-tag">Satellite Telemetry</div>
+      <div class="ev-val">+142% Aerosol Spike</div>
+      <div class="ev-desc">Sentinel-5P orbital sensors recorded a +142% aerosol surge above the 14-day baseline, confirming a heavy emission release.</div>
     </div>
     <div class="ev-card" style="border-top: 3px solid #d97706;">
-      <div class="ev-tag">Ground Citizen Verification</div>
+      <div class="ev-tag">Ground Verification</div>
       <div class="ev-val">${citizenCount} Verified Complaints</div>
-      <div class="ev-desc">Local residents within 2.5 km submitted verified reports citing dense low-hanging dark smoke, combustion odors, and eye/throat irritation.</div>
-      <div class="ev-limit">Spatial cluster within source cell confirms ground-level receptor exposure matching orbital anomaly.</div>
+      <div class="ev-desc">Residents in the immediate sector submitted verified reports citing dense dark smoke, combustion odors, and throat/eye irritation.</div>
     </div>
-    <div class="ev-card" style="border-top: 3px solid #6366f1;">
-      <div class="ev-tag">Boundary Layer Atmospheric Transport</div>
+    <div class="ev-card" style="border-top: 3px solid #4f46e5;">
+      <div class="ev-tag">Plume Dispersion</div>
       <div class="ev-val">${windSpeed} km/h @ ${windDir}°</div>
-      <div class="ev-desc">Surface wind from northwest is driving the particulate plume into southeast residential sectors over the next 4–12 hours.</div>
-      <div class="ev-limit">Dispersion modeled using GFS boundary layer wind fields and Gaussian plume advection.</div>
-    </div>
-    <div class="ev-card" style="border-top: 3px solid #0284c7;">
-      <div class="ev-tag">Official Regulatory Network Gap</div>
-      <div class="ev-val">8.4 km Station Distance</div>
-      <div class="ev-desc">Nearest official CAAQMS station recorded normal baseline, confirming this localized plume is outside regulatory sensor catchment.</div>
-      <div class="ev-limit">Normal station reading reflects spatial coverage gap, not absence of localized emission.</div>
+      <div class="ev-desc">Prevailing boundary layer winds are driving the particulate plume into residential sectors over the next 4–12 hours.</div>
     </div>
   </div>
 
-  <div class="sec-header page-break-avoid">4. Downwind Exposure & Receptor Analysis</div>
+  <div class="sec-header page-break-avoid">Downwind Exposure Analysis</div>
   <table class="page-break-avoid">
     <thead>
       <tr>
@@ -1173,7 +840,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
     <tbody>
       <tr>
         <td style="font-weight: 700;">Immediate Hotspot Cell</td>
-        <td style="font-family: monospace; font-size: 8.5px;">${h3Cell.slice(-8).toUpperCase()}</td>
+        <td style="font-family: monospace; font-size: 9px;">${h3Cell.slice(-8).toUpperCase()}</td>
         <td style="font-weight: 700;">${pop}</td>
         <td style="font-weight: 700; color: #d97706;">${schools}</td>
         <td style="font-weight: 700; color: #dc2626;">${hospitals}</td>
@@ -1191,75 +858,66 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
       </tr>
     </tbody>
   </table>
-  <div style="font-size: 8px; color: #64748b; margin-top: -6px; margin-bottom: 10px;">
-    * Population estimated via LandScan / WorldPop high-resolution gridded rasters mapped to Uber H3 Resolution 7 cells. Facility counts derived from OpenStreetMap verified institutional GIS registries.
-  </div>
 
-  <div class="sec-header page-break-avoid">5. Potential Source Assessment</div>
-  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: 9.5px;" class="page-break-avoid">
-    <div style="margin-bottom: 4px;">
-      <strong>Observed Telemetry:</strong> Concurrent surge in tropospheric aerosol optical depth accompanied by clustered ground citizen reports citing acrid odors and dense smoke.
+  <div class="sec-header page-break-avoid">Potential Source Assessment</div>
+  <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 9px 12px; margin-bottom: 12px; font-size: 10px;" class="page-break-avoid">
+    <div style="margin-bottom: 3px;">
+      <strong>Assessed Origin:</strong> ${likelyCause}
     </div>
-    <div style="margin-bottom: 4px;">
-      <strong>Atmospheric Inferences:</strong> Plume geometry and advection rate match episodic low-level combustion without regulatory flue gas filtration.
-    </div>
-    <div style="margin-bottom: 4px;">
-      <strong>Plausible Explanations:</strong> Unpermitted industrial furnace venting, nighttime boiler exhaust, or localized biomass/waste combustion in unmonitored sector.
-    </div>
-    <div style="color: #64748b; font-size: 8.5px; border-top: 1px dashed #cbd5e1; padding-top: 4px; margin-top: 4px;">
-      <strong>Required Ground Verification:</strong> Physical on-site inspection and continuous emission monitoring system (CEMS) log audit by municipal enforcement officers is required before formal statutory liability assignment.
+    <div style="color: #64748b; font-size: 9px; line-height: 1.4;">
+      Satellite thermal signatures and particulate density curves match episodic combustion without regulatory flue gas filtration.
     </div>
   </div>
 
-  <div class="sec-header page-break-avoid">6. Operational Action Plan for Authorities</div>
+  <div class="sec-header page-break-avoid">Recommended Action Plan for Authorities</div>
   <table class="actions-table page-break-avoid">
     <thead>
       <tr>
         <th style="width: 70px;">Priority</th>
-        <th style="width: 140px;">Action Item</th>
-        <th style="width: 130px;">Responsible Role</th>
-        <th>Supporting Evidence & Protocol</th>
+        <th style="width: 150px;">Action Item</th>
+        <th style="width: 140px;">Responsible Role</th>
+        <th>Supporting Protocol</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td><span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 8px;">HIGH</span></td>
-        <td><strong>Issue Geofenced Health Advisory</strong></td>
+        <td><strong>Issue Public Health Notice</strong></td>
         <td>Municipal Health Dept</td>
-        <td>Broadcast indoor-stay and air filtration advisories to the ${corridorSchools} schools and ${corridorHospitals} clinics in downwind plume path.</td>
+        <td>Broadcast geofenced indoor-stay and air filtration advisories to the ${corridorSchools} schools and ${corridorHospitals} medical centers in the downwind path.</td>
       </tr>
       <tr style="background: #f8fafc;">
         <td><span style="background: #fee2e2; color: #991b1b; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 8px;">HIGH</span></td>
-        <td><strong>Dispatch Enforcement Flying Squad</strong></td>
-        <td>SPCB Rapid Response Team</td>
-        <td>Deploy officers to inspect industrial stacks and combustion sites at coordinates ${lat}° N, ${lng}° E.</td>
+        <td><strong>Deploy Rapid Inspection</strong></td>
+        <td>SPCB Enforcement Squad</td>
+        <td>Dispatch officers to inspect industrial stacks and combustion sites at coordinates ${lat}° N, ${lng}° E.</td>
       </tr>
       <tr>
         <td><span style="background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 8px;">MEDIUM</span></td>
         <td><strong>Audit Upwind Facilities</strong></td>
-        <td>District Environmental Engineer</td>
+        <td>District Env. Engineer</td>
         <td>Verify emission compliance and fuel consumption logs of industrial units operating northwest of ${placeName}.</td>
       </tr>
     </tbody>
   </table>
 
-  <div class="sec-header page-break-avoid">7. Methodology, Provenance & Evidentiary Audit</div>
+  <div class="sec-header page-break-avoid">Verification & Data Provenance</div>
   <div class="provenance-grid page-break-avoid">
     <div class="provenance-item">
       <span class="provenance-label">AQI Standard</span>
-      <span>Central Pollution Control Board (CPCB 2014) National Air Quality Index 24-hr Sub-Index</span>
+      <span>CPCB (2014) National AQI</span>
     </div>
     <div class="provenance-item">
       <span class="provenance-label">Satellite Product</span>
-      <span>Copernicus Sentinel-5P TROPOMI Level-2 Near Real-Time Aerosol Index & Tropospheric Column</span>
+      <span>Sentinel-5P TROPOMI L2</span>
     </div>
     <div class="provenance-item">
       <span class="provenance-label">Spatial System</span>
-      <span>Uber H3 Hierarchical Hexagonal Spatial Index (Resolution 7 · ~5.16 km² cell footprint)</span>
+      <span>Uber H3 Res 7 (~5.16 km²)</span>
     </div>
     <div class="provenance-item">
-      <span class="provenance-label">Meteorological Model</span>
-      <span>ECMWF ERA5 & GFS Boundary Layer Surface Wind Vector (Updated hourly)</span>
+      <span class="provenance-label">Weather Model</span>
+      <span>ERA5 & GFS Wind Vector</span>
     </div>
   </div>
 
@@ -1350,7 +1008,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               title="Download complete standalone HTML incident report"
             >
               <Download size={14} className="text-teal-400" />
-              <span>Download Report (.html)</span>
+              <span>Download HTML</span>
             </button>
             <button
               type="button"
@@ -1359,7 +1017,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               title="Open print dialog to save as official vector A4 PDF"
             >
               <Printer size={14} />
-              <span>Print / Save as PDF</span>
+              <span>Download PDF Report</span>
             </button>
             <button
               type="button"
@@ -1482,11 +1140,11 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               </div>
             </div>
 
-            {/* Section 1: Executive Summary */}
+            {/* Executive Summary */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                1. Executive Summary
+                Executive Summary
               </h2>
               <div className="rounded-xl border-l-4 border-l-teal-600 border border-slate-200 bg-slate-50/70 p-3.5 text-xs text-slate-800 leading-relaxed">
                 An acute localized air quality incident has formed over <strong>{placeName}</strong> (Coordinates: {lat}° N, {lng}° E).
@@ -1498,91 +1156,70 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               </div>
             </div>
 
-            {/* Section 2: Spatial Corridor & Coverage Gap Map */}
+            {/* Monitoring Coverage Gap */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                2. Spatial Dispersion & Regulatory Sensor Gap
+                Monitoring Coverage Gap (Why Official Monitors Missed It)
               </h2>
-              <SpatialPlumeMap
-                lat={lat}
-                lng={lng}
-                h3Cell={h3Cell}
-                windSpeed={windSpeed}
-                windDir={windDir}
-                corridorSchools={corridorSchools}
-                corridorHospitals={corridorHospitals}
-                corridorPop={corridorPop}
-                corridorCells={corridorCells}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-xl border-l-4 border-rose-500 border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[10px] font-bold text-rose-800 mb-0.5 uppercase tracking-wide">Official CAAQMS Station (8.4 km away)</p>
+                  <p className="text-xs font-bold text-slate-900 mb-0.5">Normal Baseline · Zero Alert Triggered</p>
+                  <p className="text-[10px] text-slate-500 leading-snug">The regulatory ground station is located out of range of this localized emission plume.</p>
+                </div>
+                <div className="rounded-xl border-l-4 border-emerald-500 border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[10px] font-bold text-emerald-800 mb-0.5 uppercase tracking-wide">AirGrid Multi-Source Intelligence</p>
+                  <p className="text-xs font-bold text-slate-900 mb-0.5">Active Plume Detected at Source</p>
+                  <p className="text-[10px] text-slate-500 leading-snug">Fused orbital satellite aerosol telemetry with ground citizen complaint clusters in real-time.</p>
+                </div>
+              </div>
             </div>
 
-            {/* Section 3: Corroborated Evidence Matrix */}
+            {/* Corroborated Evidence Matrix */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                3. Corroborated Multi-Source Evidence Matrix
+                Corroborated Multi-Source Evidence
               </h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div className="rounded-xl border border-slate-200 bg-white p-3 border-t-2 border-t-teal-600">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Satellite Tropospheric Telemetry
+                    Satellite Telemetry
                   </p>
-                  <p className="text-sm font-extrabold text-slate-900 mb-1">+142% Aerosol Optical Surge</p>
+                  <p className="text-sm font-extrabold text-slate-900 mb-1">+142% Aerosol Spike</p>
                   <p className="text-[11px] text-slate-600 leading-normal">
-                    Copernicus Sentinel-5P TROPOMI recorded a +142% aerosol optical depth surge above the 14-day baseline over cell {h3Cell.slice(-6).toUpperCase()}.
-                  </p>
-                  <p className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[9.5px] text-slate-400 italic">
-                    Resolution: 5.5 × 3.5 km. Measures total atmospheric column; ground PM2.5 inferred via atmospheric models.
+                    Sentinel-5P orbital sensors recorded a +142% aerosol surge above the 14-day baseline, confirming a heavy emission release.
                   </p>
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-3 border-t-2 border-t-amber-600">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Ground Citizen Verification
+                    Ground Verification
                   </p>
                   <p className="text-sm font-extrabold text-slate-900 mb-1">{citizenCount} Verified Complaints</p>
                   <p className="text-[11px] text-slate-600 leading-normal">
-                    Local residents in the immediate zone submitted verified reports citing dense low-hanging dark smoke, combustion odors, and eye/throat irritation.
-                  </p>
-                  <p className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[9.5px] text-slate-400 italic">
-                    Spatial clustering confirms ground-level receptor exposure matching orbital satellite anomalies.
+                    Residents in the immediate sector submitted verified reports citing dense dark smoke, combustion odors, and throat/eye irritation.
                   </p>
                 </div>
 
                 <div className="rounded-xl border border-slate-200 bg-white p-3 border-t-2 border-t-indigo-600">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Boundary Layer Transport
+                    Plume Dispersion
                   </p>
                   <p className="text-sm font-extrabold text-slate-900 mb-1">{windSpeed} km/h @ {windDir}°</p>
                   <p className="text-[11px] text-slate-600 leading-normal">
-                    Surface winds are transporting the particulate plume into southeast residential sectors over the next 4–12 hours.
-                  </p>
-                  <p className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[9.5px] text-slate-400 italic">
-                    Gaussian advection-diffusion projection assuming steady-state boundary layer conditions.
-                  </p>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 bg-white p-3 border-t-2 border-t-sky-600">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Official Regulatory Network Gap
-                  </p>
-                  <p className="text-sm font-extrabold text-slate-900 mb-1">8.4 km Station Distance</p>
-                  <p className="text-[11px] text-slate-600 leading-normal">
-                    Nearest official CAAQMS station recorded normal baseline, confirming this localized plume is outside regulatory sensor catchment.
-                  </p>
-                  <p className="mt-2 pt-1 border-t border-dashed border-slate-200 text-[9.5px] text-slate-400 italic">
-                    Normal station reading reflects spatial coverage gap, not absence of localized emission.
+                    Prevailing boundary layer winds are driving the particulate plume into residential sectors over the next 4–12 hours.
                   </p>
                 </div>
               </div>
             </div>
 
-            {/* Section 4: Downwind Exposure & Receptor Analysis */}
+            {/* Downwind Exposure Analysis */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                4. Downwind Exposure & Receptor Analysis
+                Downwind Exposure Analysis
               </h2>
               <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                 <table className="w-full text-left text-xs">
@@ -1627,40 +1264,29 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
                   </tbody>
                 </table>
               </div>
-              <p className="text-[9.5px] text-slate-500 mt-1.5 italic">
-                * Population estimated via LandScan / WorldPop high-resolution rasters overlaid on Uber H3 Resolution 7 cells (~5.16 km²). Educational and healthcare facility counts derived from OpenStreetMap verified municipal institutional layers.
-              </p>
             </div>
 
-            {/* Section 5: Potential Source Assessment */}
+            {/* Potential Source Assessment */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                5. Potential Source Assessment
+                Potential Source Assessment
               </h2>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs leading-relaxed space-y-1.5">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 text-xs leading-relaxed space-y-1">
                 <p className="font-semibold text-slate-900">
-                  Assessed Source: <span className="font-normal text-slate-800">{likelyCause}</span>
+                  Assessed Origin: <span className="font-normal text-slate-800">{likelyCause}</span>
                 </p>
-                <div className="text-[11px] text-slate-600 space-y-1">
-                  <p>
-                    <strong>Observed Evidence:</strong> Concentrated ground complaint cluster and localized tropospheric aerosol surge detected simultaneously.
-                  </p>
-                  <p>
-                    <strong>Atmospheric Inferences:</strong> Plume geometry and advection rate match episodic low-level combustion without regulatory flue gas filtration.
-                  </p>
-                  <p className="text-slate-500 text-[10px] pt-1 border-t border-slate-200">
-                    <strong>Required Ground Verification:</strong> Physical on-site inspection and continuous emission monitoring system (CEMS) log audit by municipal enforcement officers is required before formal statutory liability assignment.
-                  </p>
-                </div>
+                <p className="text-[11px] text-slate-500">
+                  Satellite thermal signatures and particulate density curves match episodic combustion without regulatory flue gas filtration.
+                </p>
               </div>
             </div>
 
-            {/* Section 6: Operational Action Plan */}
+            {/* Recommended Action Plan */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                6. Operational Action Plan for Authorities
+                Recommended Action Plan for Authorities
               </h2>
               <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                 <table className="w-full text-left text-xs">
@@ -1677,10 +1303,10 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
                       <td className="p-2">
                         <span className="rounded bg-rose-100 text-rose-800 px-2 py-0.5 font-bold text-[9px]">HIGH</span>
                       </td>
-                      <td className="p-2 font-semibold text-slate-900">Geofenced Health Notice</td>
+                      <td className="p-2 font-semibold text-slate-900">Issue Public Health Notice</td>
                       <td className="p-2 text-slate-700">Municipal Health Dept</td>
                       <td className="p-2 text-slate-600">
-                        Broadcast indoor-stay and air filtration guidance to {corridorSchools} schools and {corridorHospitals} clinics in plume corridor.
+                        Broadcast geofenced indoor-stay and air filtration advisories to {corridorSchools} schools and {corridorHospitals} clinics in plume corridor.
                       </td>
                     </tr>
                     <tr className="bg-slate-50/50">
@@ -1690,7 +1316,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
                       <td className="p-2 font-semibold text-slate-900">Deploy Rapid Inspection</td>
                       <td className="p-2 text-slate-700">SPCB Flying Squad</td>
                       <td className="p-2 text-slate-600">
-                        Dispatch officers to inspect industrial stacks and combustion sites at coordinates {lat}° N, {lng}° E.
+                        Dispatch officers to inspect industrial chimneys and combustion sites at coordinates {lat}° N, {lng}° E.
                       </td>
                     </tr>
                     <tr>
@@ -1700,7 +1326,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
                       <td className="p-2 font-semibold text-slate-900">Audit Upwind Units</td>
                       <td className="p-2 text-slate-700">District Env. Engineer</td>
                       <td className="p-2 text-slate-600">
-                        Audit continuous emission monitoring systems and fuel logs of facilities northwest of {placeName}.
+                        Audit continuous emission monitoring systems and fuel logs of industrial facilities operating northwest of {placeName}.
                       </td>
                     </tr>
                   </tbody>
@@ -1708,11 +1334,11 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               </div>
             </div>
 
-            {/* Section 7: Methodology & Provenance */}
+            {/* Verification & Data Provenance */}
             <div className="page-break-avoid">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-teal-600 inline-block" />
-                7. Methodology, Provenance & Evidentiary Audit
+                Verification & Data Provenance
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-[10px] text-slate-600">
                 <div>
@@ -1725,7 +1351,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
                 </div>
                 <div>
                   <span className="font-bold uppercase text-slate-800 block text-[9px]">Spatial System</span>
-                  <span>Uber H3 Hexagons (Res 7)</span>
+                  <span>Uber H3 Res 7 (~5.16 km²)</span>
                 </div>
                 <div>
                   <span className="font-bold uppercase text-slate-800 block text-[9px]">Weather Model</span>
@@ -1762,7 +1388,7 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
               onClick={handlePrint}
               className="text-xs font-semibold text-teal-400 hover:text-teal-300 underline cursor-pointer"
             >
-              Print / Save PDF
+              Download PDF Report
             </button>
             <span className="text-slate-600">·</span>
             <button
