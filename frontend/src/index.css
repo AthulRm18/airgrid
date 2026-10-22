@@ -222,6 +222,11 @@ body {
     box-shadow: none !important;
     overflow: visible !important;
     height: auto !important;
+    background: transparent !important;
+  }
+  .legal-dossier-card header,
+  .legal-dossier-card footer {
+    display: none !important;
   }
   #legal-dossier-print, #legal-dossier-print * {
     visibility: visible;
