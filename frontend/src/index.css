@@ -190,28 +190,60 @@ body {
 
 /* ── Print styling for Statutory Evidence Dossier ── */
 @media print {
-  body {
+  @page {
+    size: A4 portrait;
+    margin: 10mm 12mm 10mm 12mm;
+  }
+  html, body {
     background: #ffffff !important;
-    color: #111827 !important;
+    color: #0f172a !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
   }
   body * {
     visibility: hidden;
+  }
+  .legal-dossier-overlay {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    display: block !important;
+    height: auto !important;
+  }
+  .legal-dossier-card {
+    position: static !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    height: auto !important;
   }
   #legal-dossier-print, #legal-dossier-print * {
     visibility: visible;
   }
   #legal-dossier-print {
-    position: absolute;
-    left: 0;
-    top: 0;
+    position: static !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
-    padding: 16px !important;
+    padding: 0 !important;
     box-shadow: none !important;
     border: none !important;
     background: #ffffff !important;
-    color: #111827 !important;
+    color: #0f172a !important;
+    display: block !important;
+  }
+  .print\:hidden {
+    display: none !important;
+  }
+  .page-break-avoid {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 }
 

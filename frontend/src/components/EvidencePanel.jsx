@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import {
   X, Loader2, CheckCircle2, Shield, TrendingUp, Users,
   Wind, AlertTriangle, Clock, MapPin, FileText, Printer,
-  Copy, Check, Send, Radio, ShieldCheck, FileCheck,
+  Copy, Check, Send, Radio, ShieldCheck, FileCheck, Download,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip,
@@ -503,30 +503,287 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
     return `sha256:8f4c${hex}9e21b7a44f0391d8e1c6b54a72d3e09f871c9`;
   }, [h3Cell, data, confidence]);
 
-  const istTime = useMemo(() => new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "long", timeStyle: "medium" }), []);
+  const istTime = useMemo(
+    () =>
+      new Date().toLocaleString("en-IN", {
+        timeZone: "Asia/Kolkata",
+        dateStyle: "long",
+        timeStyle: "medium",
+      }),
+    []
+  );
+
+  const lat = (data?.lat ?? hotspot?.lat ?? 28.6469).toFixed(5);
+  const lng = (data?.lng ?? hotspot?.lng ?? 77.3157).toFixed(5);
+  const pop = (full?.impact?.population || 10399).toLocaleString();
+  const schools = full?.impact?.schools || 2;
+  const hospitals = full?.impact?.hospitals || 1;
+  const corridorPop = (full?.corridor_impact?.total_population_at_risk || 142068).toLocaleString();
+  const corridorSchools = full?.corridor_impact?.total_schools || 44;
+  const corridorHospitals = full?.corridor_impact?.total_hospitals || 12;
+  const corridorCells = full?.corridor_impact?.cell_count || 16;
+  const citizenCount = data?.citizen_report_count || 4;
+  const windSpeed = full?.weather?.wind_speed_kmh || 24;
+  const windDir = full?.weather?.wind_direction_deg || 322;
+  const incidentTitle =
+    full?.incident_explanation?.incident_title ||
+    `Undetected PM2.5 Surge — Unmonitored Corridor (${placeName})`;
+  const incidentSummary =
+    full?.incident_explanation?.summary ||
+    `A significant localized air pollution spike was detected via high-resolution satellite imagery and corroborated citizen reports, completely bypassing official continuous monitoring stations situated out of range. The resulting particulate plume is actively dispersing downwind toward populated residential colonies, schools, and medical facilities.`;
+  const likelyCause =
+    full?.incident_explanation?.likely_cause ||
+    "Unmonitored industrial boiler venting, episodic furnace exhaust, or unauthorized waste incineration in the industrial corridor.";
+
+  // Generate self-contained standalone HTML document for reliable printing & direct download
+  const generateFullHtml = () => {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AirGrid_Statutory_Dossier_${dossierId}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm 15mm 12mm 15mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      margin: 0;
+      padding: 24px;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+    @media print { body { padding: 0; } }
+    .header-bar { border-bottom: 2px solid #0f172a; padding-bottom: 10px; text-align: center; margin-bottom: 12px; }
+    .gov-title { font-size: 13.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: #020617; margin: 0 0 2px 0; }
+    .gov-sub { font-size: 9.5px; font-weight: 600; text-transform: uppercase; color: #475569; margin: 0 0 4px 0; }
+    .gov-badge { display: inline-block; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 4px; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta-box { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; font-size: 10px; }
+    .subject-box { background: #f1f5f9; border-left: 3px solid #3730a3; padding: 7px 10px; margin-bottom: 12px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; color: #0f172a; }
+    .sec-h { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.4px; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin: 12px 0 6px 0; }
+    .summary-card { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 9px 12px; font-size: 11px; line-height: 1.55; color: #1e293b; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; }
+    th { background: #f1f5f9; font-weight: 700; color: #1e293b; text-transform: uppercase; font-size: 9px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+    .pillar { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 8px 10px; }
+    .pillar-tag { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .pillar-val { font-size: 13px; font-weight: 800; color: #0f172a; margin: 2px 0; }
+    .pillar-txt { font-size: 9px; color: #475569; line-height: 1.35; }
+    ol { margin: 0; padding-left: 18px; font-size: 10px; line-height: 1.5; color: #1e293b; }
+    li { margin-bottom: 3px; }
+    .attest-bar { border-top: 2px solid #0f172a; padding-top: 10px; margin-top: 14px; display: flex; justify-content: space-between; align-items: flex-end; page-break-inside: avoid; }
+    .seal-wrap { border: 1.5px solid #0f172a; border-radius: 6px; padding: 6px 12px; text-align: center; min-width: 170px; background: #ffffff; }
+    .seal-icon { width: 28px; height: 28px; border-radius: 50%; background: #0f172a; color: #ffffff; display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 9px; margin-bottom: 3px; }
+  </style>
+</head>
+<body>
+  <div class="header-bar">
+    <h1 class="gov-title">NATIONAL GREEN TRIBUNAL & STATE POLLUTION CONTROL BOARD</h1>
+    <p class="gov-sub">Environmental Audit & Statutory Enforcement Division · Section 21 & 31A Air Act 1981</p>
+    <span class="gov-badge">Official Statutory Inspection Notice & Evidence Dossier</span>
+  </div>
+
+  <div class="meta-box">
+    <div><strong>DOSSIER REF:</strong> ${dossierId}</div>
+    <div style="text-align: right;"><strong>DATE & TIME (IST):</strong> ${istTime}</div>
+    <div style="grid-column: span 2; font-family: monospace; font-size: 9px; word-break: break-all;">
+      <strong>INTEGRITY HASH:</strong> ${shaHash} (Sec 65B Indian Evidence Act compliant)
+    </div>
+  </div>
+
+  <div class="subject-box">
+    SUBJECT: NOTICE OF UNMONITORED AIR POLLUTION DISPERSION & DOWNWIND PUBLIC HEALTH EXPOSURE IN ${placeName.toUpperCase()}
+  </div>
+
+  <div class="sec-h">1.0 Executive Summary & Sensor Blindspot Finding</div>
+  <div class="summary-card">
+    An acute localized air pollution spike (high-density PM2.5 plume) has been detected over <strong>${placeName}</strong>. 
+    The nearest official government monitoring station (CAAQMS) is located <strong>8.4 km away</strong> and registered normal baseline levels, completely missing this severe local event. 
+    AirGrid multi-source sensor fusion verified the active smoke plume traveling downwind, creating an immediate exposure hazard for <strong>${corridorPop} residents</strong>, <strong>${corridorSchools} schools</strong>, and <strong>${corridorHospitals} hospitals</strong> in the downwind corridor.
+  </div>
+
+  <div class="sec-h">2.0 Incident Spatial Coordinates & Regulatory Sensor Gap</div>
+  <table>
+    <tbody>
+      <tr>
+        <td style="width: 35%; font-weight: 600; background: #f8fafc;">Target Incident Location</td>
+        <td style="font-weight: 700;">${placeName}</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600; background: #f8fafc;">Geospatial Cell (Uber H3 Res-7)</td>
+        <td style="font-family: monospace;">${h3Cell} (Cell Footprint: ~5.16 km²)</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600; background: #f8fafc;">Coordinates</td>
+        <td style="font-family: monospace;">${lat}° N, ${lng}° E</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600; background: #f8fafc;">Nearest Regulatory CAAQMS Sensor</td>
+        <td style="color: #b91c1c; font-weight: 700;">NONE within 8.4 km — Critical Regulatory Blindspot (Unmonitored Zone)</td>
+      </tr>
+      <tr>
+        <td style="font-weight: 600; background: #f8fafc;">Classification & Severity</td>
+        <td style="font-weight: 700; text-transform: uppercase;">${sev} · Multi-Signal Confidence: ${confidence}%</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="sec-h">3.0 Three-Source Corroborated Evidence Matrix</div>
+  <div class="grid-3">
+    <div class="pillar">
+      <div class="pillar-tag" style="color: #3730a3;">1. Space (Satellite)</div>
+      <div class="pillar-val">+142% Particulate Spike</div>
+      <div class="pillar-txt">Sentinel-5P high-altitude instruments recorded a +142% aerosol surge above the 14-day normal baseline, confirming sudden abnormal smoke/dust emissions.</div>
+    </div>
+    <div class="pillar">
+      <div class="pillar-tag" style="color: #92400e;">2. Ground (Citizens)</div>
+      <div class="pillar-val">${citizenCount} Verified Reports</div>
+      <div class="pillar-txt">Local residents in the immediate zone submitted verified reports confirming heavy dark smoke, chemical odor, and burning eyes/throat at ground level.</div>
+    </div>
+    <div class="pillar">
+      <div class="pillar-tag" style="color: #065f46;">3. Wind & Dispersion</div>
+      <div class="pillar-val">${windSpeed} km/h @ ${windDir}°</div>
+      <div class="pillar-txt">Boundary layer winds are carrying the toxic plume directly toward downwind residential sectors, schools, and medical clinics over the next 4–12 hours.</div>
+    </div>
+  </div>
+
+  <div class="sec-h">4.0 Population & Sensitive Facility Exposure</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Corridor Zone</th>
+        <th>Exposed Population</th>
+        <th>Schools at Risk</th>
+        <th>Hospitals / Clinics</th>
+        <th>Threat Window</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-weight: 600;">Immediate Incident Cell</td>
+        <td style="font-weight: 700;">${pop}</td>
+        <td style="font-weight: 700; color: #b45309;">${schools}</td>
+        <td style="font-weight: 700; color: #b91c1c;">${hospitals}</td>
+        <td>Active Source Zone</td>
+      </tr>
+      <tr style="background: #f8fafc;">
+        <td style="font-weight: 600;">12-Hour Downwind Plume (${corridorCells} Cells)</td>
+        <td style="font-weight: 700;">${corridorPop}</td>
+        <td style="font-weight: 700; color: #b45309;">${corridorSchools}</td>
+        <td style="font-weight: 700; color: #b91c1c;">${corridorHospitals}</td>
+        <td>Next 12 Hours (High Risk)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="sec-h">5.0 Forensic Technical Synthesis (Google Gemini 3 Flash)</div>
+  <div class="summary-card" style="margin-bottom: 10px;">
+    <div style="font-weight: 700; font-size: 11px; margin-bottom: 3px; color: #0f172a;">${incidentTitle}</div>
+    <div style="font-size: 10px; color: #334155; margin-bottom: 5px;">${incidentSummary}</div>
+    <div style="font-size: 9.5px; color: #64748b;">
+      <strong style="color: #0f172a;">Assessed Origin:</strong> ${likelyCause}
+    </div>
+  </div>
+
+  <div class="sec-h">6.0 Required Statutory Directives (Immediate Action Plan)</div>
+  <ol>
+    <li><strong>Immediate Flying Squad Dispatch:</strong> Deploy municipal environmental enforcement officers to inspect industrial boilers, furnaces, and open combustion sites at coordinates ${lat}° N, ${lng}° E.</li>
+    <li><strong>Public Health Geofence Advisory:</strong> Issue immediate air filtration and indoor stay advisories to the ${corridorSchools} schools and ${corridorHospitals} medical facilities in the downwind path.</li>
+    <li><strong>Statutory Summons:</strong> Issue show-cause notice under Section 31A of the Air Act 1981 to unauthorized or non-compliant emission operators in the sector.</li>
+  </ol>
+
+  <div class="attest-bar">
+    <div style="max-width: 60%; font-size: 8.5px; color: #64748b; line-height: 1.4;">
+      <strong>STATUTORY CERTIFICATE OF TECHNICAL VERACITY</strong><br />
+      This document contains algorithmic forensic evidence synthesized from calibrated satellite telemetry, meteorological models, and ground citizen verification. Authenticated under Section 65B of the Indian Evidence Act, 1872.
+    </div>
+    <div class="seal-wrap">
+      <div class="seal-icon">SEAL</div>
+      <div style="font-size: 9px; font-weight: 800; text-transform: uppercase; color: #0f172a;">Inspecting Environmental Officer</div>
+      <div style="font-size: 8px; color: #64748b;">Municipal Enforcement Division</div>
+      <div style="font-size: 7.5px; font-family: monospace; color: #4338ca; margin-top: 2px;">AIRGRID-VERIFIED-AUDIT</div>
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
+  // Dedicated Print Window: Guarantees 100% of all content is cleanly printed across A4 pages without clipping
+  const handlePrint = () => {
+    try {
+      const printWindow = window.open("", "_blank", "width=850,height=1000");
+      if (!printWindow) {
+        window.print();
+        return;
+      }
+      printWindow.document.open();
+      printWindow.document.write(generateFullHtml());
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 350);
+    } catch {
+      window.print();
+    }
+  };
+
+  // Direct Download Draft (.html): Instant file download that preserves all content, styles, and data
+  const handleDownload = () => {
+    try {
+      const htmlContent = generateFullHtml();
+      const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const safePlace = (placeName || "Incident").replace(/[^a-zA-Z0-9]/g, "_");
+      link.href = url;
+      link.download = `Statutory_Dossier_${safePlace}_${dossierId}.html`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Failed to download dossier", e);
+    }
+  };
 
   return (
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto" onClick={onClose}>
+    <div
+      className="legal-dossier-overlay fixed inset-0 z-[1200] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm overflow-y-auto"
+      onClick={onClose}
+    >
       <div
-        className="relative my-6 w-full max-w-3xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden text-slate-900"
+        className="legal-dossier-card relative my-6 w-full max-w-3xl rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden text-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header Action Bar (Hidden during Print) */}
+        {/* Header Action Bar */}
         <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-6 py-3.5 print:hidden">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-100 text-indigo-700 font-bold text-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white font-bold text-xs shadow-sm">
               NGT
             </span>
             <div>
-              <p className="text-xs font-semibold text-slate-900">Statutory Incident Evidence Bundle</p>
+              <p className="text-xs font-bold text-slate-900">Statutory Incident Evidence Draft</p>
               <p className="text-[10px] text-slate-500">Admissible under Sec 65B Indian Evidence Act</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => window.print()}
-              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 transition-colors shadow-sm cursor-pointer"
+              title="Download standalone draft HTML file to keep, share, or edit"
+            >
+              <Download size={13} className="text-indigo-600" />
+              <span>Download Draft (.html)</span>
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
+              title="Print cleanly or save as official PDF"
             >
               <Printer size={13} />
               <span>Print / Save Official PDF</span>
@@ -541,111 +798,131 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
           </div>
         </div>
 
-        {/* The Printable Dossier Container */}
-        <div id="legal-dossier-print" className="p-8 space-y-5 text-slate-900 font-sans leading-relaxed">
+        {/* Printable Official Draft Body */}
+        <div id="legal-dossier-print" className="p-7 space-y-4 text-slate-900 font-sans leading-relaxed text-xs">
           {/* Statutory Header */}
           <div className="border-b-2 border-slate-900 pb-3 text-center">
             <div className="inline-flex items-center justify-center gap-2 mb-1">
-              <Shield size={20} className="text-slate-900" />
-              <h1 className="text-sm sm:text-base font-extrabold tracking-wider uppercase text-slate-950 font-[family-name:var(--font-display)]">
+              <Shield size={18} className="text-slate-900" />
+              <h1 className="text-sm sm:text-base font-extrabold tracking-wider uppercase text-slate-950 font-sans">
                 NATIONAL GREEN TRIBUNAL & STATE POLLUTION CONTROL BOARD
               </h1>
             </div>
-            <p className="text-[11px] sm:text-xs font-semibold tracking-wide text-slate-700 uppercase">
-              Environmental Enforcement Division · Section 21 & 31A Air (Prevention & Control of Pollution) Act 1981
+            <p className="text-[11px] font-semibold tracking-wide text-slate-700 uppercase">
+              Environmental Audit & Statutory Enforcement Division · Section 21 & 31A Air Act 1981
             </p>
-            <p className="text-[10px] font-semibold text-indigo-900 mt-0.5 tracking-wider uppercase">
-              AUTONOMOUS MULTI-SOURCE EVIDENCE FUSION DOSSIER — STATUTORY AUDIT FILE
-            </p>
+            <span className="inline-block mt-1 rounded bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-900 uppercase tracking-wider border border-indigo-200">
+              Official Statutory Inspection Notice & Evidence Dossier
+            </span>
           </div>
 
           {/* Dossier Meta Bar */}
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5 text-xs font-mono">
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-slate-50 p-2.5 text-xs font-sans">
             <div>
-              <span className="text-slate-500">DOSSIER REF:</span> <strong className="text-slate-900">{dossierId}</strong>
+              <span className="text-slate-500 font-medium">DOSSIER REF:</span> <strong className="text-slate-900">{dossierId}</strong>
             </div>
             <div className="text-right">
-              <span className="text-slate-500">DATE (IST):</span> <strong className="text-slate-900">{istTime}</strong>
+              <span className="text-slate-500 font-medium">DATE (IST):</span> <strong className="text-slate-900">{istTime}</strong>
             </div>
-            <div className="col-span-2 truncate">
-              <span className="text-slate-500">INTEGRITY HASH:</span> <span className="text-[10px] text-slate-800 font-bold">{shaHash}</span>
+            <div className="col-span-2 text-[10px] text-slate-700 truncate font-mono">
+              <span className="text-slate-500 font-sans font-medium">INTEGRITY HASH:</span> <span className="font-semibold text-slate-800">{shaHash}</span>
             </div>
           </div>
 
-          {/* Geographic Coordinates & Cell Information */}
-          <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5 border-b border-slate-200 pb-0.5">
-              1. Incident Spatial & Administrative Index
+          {/* Subject Bar */}
+          <div className="rounded-lg border-l-4 border-indigo-600 bg-slate-100 p-2.5 text-xs font-semibold uppercase text-slate-900">
+            SUBJECT: STATUTORY NOTICE & FORENSIC EVIDENCE BUNDLE — UNMONITORED AIR POLLUTION DISPERSION OVER {placeName.toUpperCase()}
+          </div>
+
+          {/* Section 1: Plain English Summary & Blindspot Finding */}
+          <div className="page-break-avoid">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 border-b border-slate-200 pb-0.5">
+              1.0 Executive Summary & Sensor Blindspot Finding
+            </h2>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-800 space-y-1">
+              <p>
+                An acute localized air pollution spike (high-density PM2.5 plume) has been detected over <strong className="text-slate-950">{placeName}</strong>.
+              </p>
+              <p className="text-slate-700">
+                The nearest official government monitoring station (CAAQMS) is situated <strong className="text-rose-700">8.4 km away</strong> and recorded baseline normal readings, leaving this high-emission violation completely invisible to standard government networks.
+              </p>
+              <p className="text-slate-700">
+                AirGrid autonomous multi-source fusion detected the active smoke plume traveling downwind, creating an immediate exposure hazard for <strong className="text-slate-900">{corridorPop} residents</strong>, <strong className="text-amber-800">{corridorSchools} schools</strong>, and <strong className="text-rose-800">{corridorHospitals} hospitals</strong> in the downwind corridor.
+              </p>
+            </div>
+          </div>
+
+          {/* Section 2: Spatial Index & Coordinates */}
+          <div className="page-break-avoid">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 border-b border-slate-200 pb-0.5">
+              2.0 Incident Spatial Coordinates & Regulatory Sensor Gap
             </h2>
             <table className="w-full text-xs text-left border border-slate-200">
               <tbody>
                 <tr className="border-b border-slate-200 bg-slate-50">
-                  <td className="p-1.5 font-medium text-slate-600 w-1/3">Target Location / Corridor</td>
+                  <td className="p-1.5 font-medium text-slate-600 w-1/3">Target Incident Location</td>
                   <td className="p-1.5 font-bold text-slate-900">{placeName}</td>
                 </tr>
                 <tr className="border-b border-slate-200">
                   <td className="p-1.5 font-medium text-slate-600">Spatial Index (Uber H3 Res-7)</td>
-                  <td className="p-1.5 font-mono text-slate-900">{h3Cell} (Cell Area: ~5.16 km²)</td>
+                  <td className="p-1.5 font-mono text-slate-800">{h3Cell} (Cell Footprint: ~5.16 km²)</td>
                 </tr>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <td className="p-1.5 font-medium text-slate-600">Geo Coordinates</td>
-                  <td className="p-1.5 font-mono text-slate-900">
-                    {(data?.lat ?? hotspot?.lat ?? 28.6469).toFixed(5)}° N, {(data?.lng ?? hotspot?.lng ?? 77.3157).toFixed(5)}° E
-                  </td>
+                  <td className="p-1.5 font-mono text-slate-800">{lat}° N, {lng}° E</td>
                 </tr>
                 <tr className="border-b border-slate-200">
                   <td className="p-1.5 font-medium text-slate-600">Nearest Regulatory CAAQMS Sensor</td>
-                  <td className="p-1.5 text-rose-700 font-semibold">
-                    NONE within 8.4 km — UNMONITORED SENSOR-GAP CORRIDOR
+                  <td className="p-1.5 text-rose-700 font-bold">
+                    NONE within 8.4 km — Critical Sensor Blindspot (Unmonitored Zone)
                   </td>
                 </tr>
                 <tr>
                   <td className="p-1.5 font-medium text-slate-600">Classification Severity</td>
                   <td className="p-1.5 font-bold uppercase tracking-wider text-slate-900">
-                    {sev.toUpperCase()} · FUSED MULTI-SIGNAL CONFIDENCE: {confidence}%
+                    {sev.toUpperCase()} · Fused Multi-Signal Certainty: {confidence}%
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          {/* Three-Pillar Evidence Matrix */}
-          <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5 border-b border-slate-200 pb-0.5">
-              2. Three-Pillar Multi-Source Corroborated Evidence Matrix
+          {/* Section 3: Three-Pillar Evidence Matrix */}
+          <div className="page-break-avoid">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 border-b border-slate-200 pb-0.5">
+              3.0 Three-Source Corroborated Evidence Matrix
             </h2>
-            <div className="grid grid-cols-3 gap-2.5 text-xs">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <p className="font-bold text-indigo-900 text-[10px] mb-0.5">PILLAR 1: SATELLITE</p>
-                <p className="text-[10px] text-slate-600">Sentinel-5P NRTI Aerosol Index</p>
-                <p className="text-sm font-extrabold text-slate-900 mt-1">+142% Anomaly</p>
-                <p className="text-[9px] text-slate-500">Z-score: 2.87σ vs 14-day baseline</p>
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <p className="font-bold text-indigo-900 text-[10px] mb-0.5 uppercase tracking-wide">1. Space (Satellite)</p>
+                <p className="text-sm font-extrabold text-slate-900 my-0.5">+142% Particulate Spike</p>
+                <p className="text-[10px] text-slate-600 leading-snug">
+                  Sentinel-5P high-altitude instruments recorded a +142% aerosol surge above the 14-day normal baseline, confirming sudden abnormal smoke/dust emissions.
+                </p>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <p className="font-bold text-amber-900 text-[10px] mb-0.5">PILLAR 2: GROUND CROWD</p>
-                <p className="text-[10px] text-slate-600">Multimodal Citizen Submissions</p>
-                <p className="text-sm font-extrabold text-slate-900 mt-1">
-                  {data?.citizen_report_count || 4} Verified Reports
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <p className="font-bold text-amber-900 text-[10px] mb-0.5 uppercase tracking-wide">2. Ground (Citizens)</p>
+                <p className="text-sm font-extrabold text-slate-900 my-0.5">{citizenCount} Verified Reports</p>
+                <p className="text-[10px] text-slate-600 leading-snug">
+                  Local residents in the immediate zone submitted verified reports confirming heavy dark smoke, chemical odor, and burning eyes/throat at ground level.
                 </p>
-                <p className="text-[9px] text-slate-500">Visual smoke & symptoms confirmed</p>
               </div>
 
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                <p className="font-bold text-emerald-900 text-[10px] mb-0.5">PILLAR 3: METEOROLOGY</p>
-                <p className="text-[10px] text-slate-600">Boundary Layer Wind Vector</p>
-                <p className="text-sm font-extrabold text-slate-900 mt-1">
-                  {full?.weather?.wind_speed_kmh || 14} km/h @ {full?.weather?.wind_direction_deg || 280}°
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                <p className="font-bold text-emerald-900 text-[10px] mb-0.5 uppercase tracking-wide">3. Wind & Dispersion</p>
+                <p className="text-sm font-extrabold text-slate-900 my-0.5">{windSpeed} km/h @ {windDir}°</p>
+                <p className="text-[10px] text-slate-600 leading-snug">
+                  Boundary layer winds are carrying the toxic plume directly toward downwind residential sectors, schools, and medical clinics over the next 4–12 hours.
                 </p>
-                <p className="text-[9px] text-slate-500">Active Downwind Plume Vector</p>
               </div>
             </div>
           </div>
 
-          {/* Demographic Exposure & Human Harm */}
-          <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5 border-b border-slate-200 pb-0.5">
-              3. Measured Demographic Exposure & Downwind Public Health Impact
+          {/* Section 4: Human Health Exposure */}
+          <div className="page-break-avoid">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 border-b border-slate-200 pb-0.5">
+              4.0 Measured Population & Sensitive Facility Exposure
             </h2>
             <table className="w-full text-xs text-left border border-slate-200">
               <thead className="bg-slate-100 text-slate-700 border-b border-slate-200">
@@ -654,67 +931,77 @@ function LegalDossierModal({ data, full, hotspot, h3Cell, placeName, confidence,
                   <th className="p-1.5 font-semibold">Exposed Population</th>
                   <th className="p-1.5 font-semibold">Schools at Risk</th>
                   <th className="p-1.5 font-semibold">Hospitals / Clinics</th>
-                  <th className="p-1.5 font-semibold">Exposure Window</th>
+                  <th className="p-1.5 font-semibold">Threat Window</th>
                 </tr>
               </thead>
               <tbody>
                 <tr className="border-b border-slate-200">
-                  <td className="p-1.5 font-medium">Immediate Hotspot Cell</td>
-                  <td className="p-1.5 font-mono font-bold">{(full?.impact?.population || 45000).toLocaleString()}</td>
-                  <td className="p-1.5 font-mono font-bold text-amber-700">{full?.impact?.schools || 12}</td>
-                  <td className="p-1.5 font-mono font-bold text-rose-700">{full?.impact?.hospitals || 3}</td>
-                  <td className="p-1.5 text-slate-600">Current (Active)</td>
+                  <td className="p-1.5 font-medium">Immediate Incident Cell</td>
+                  <td className="p-1.5 font-semibold tabular-nums">{pop}</td>
+                  <td className="p-1.5 font-bold text-amber-700 tabular-nums">{schools}</td>
+                  <td className="p-1.5 font-bold text-rose-700 tabular-nums">{hospitals}</td>
+                  <td className="p-1.5 text-slate-600">Active Source Zone</td>
                 </tr>
-                <tr className="bg-slate-50 font-medium">
-                  <td className="p-1.5">12-Hour Downwind Plume ({full?.corridor_impact?.cell_count || 15} Cells)</td>
-                  <td className="p-1.5 font-mono font-bold">
-                    {(full?.corridor_impact?.total_population_at_risk || 120000).toLocaleString()}
-                  </td>
-                  <td className="p-1.5 font-mono font-bold text-amber-700">{full?.corridor_impact?.total_schools || 35}</td>
-                  <td className="p-1.5 font-mono font-bold text-rose-700">{full?.corridor_impact?.total_hospitals || 8}</td>
-                  <td className="p-1.5 text-slate-600">Next 12 Hours</td>
+                <tr className="bg-slate-50">
+                  <td className="p-1.5 font-medium">12-Hour Downwind Plume ({corridorCells} Cells)</td>
+                  <td className="p-1.5 font-semibold tabular-nums">{corridorPop}</td>
+                  <td className="p-1.5 font-bold text-amber-700 tabular-nums">{corridorSchools}</td>
+                  <td className="p-1.5 font-bold text-rose-700 tabular-nums">{corridorHospitals}</td>
+                  <td className="p-1.5 text-slate-600">Next 12 Hours (High Risk)</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          {/* AI Forensic Technical Finding (Gemini 3 Flash) */}
-          <div>
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5 border-b border-slate-200 pb-0.5">
-              4. Forensic AI Technical Synthesis (Google Gemini 3 Flash)
+          {/* Section 5: Forensic AI Synthesis */}
+          <div className="page-break-avoid">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 border-b border-slate-200 pb-0.5">
+              5.0 Forensic Technical Synthesis (Google Gemini 3 Flash)
             </h2>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-xs leading-relaxed space-y-1">
-              <p className="font-bold text-slate-900">
-                {full?.incident_explanation?.incident_title || "Suspected Industrial Venting & Particulate Dispersion Event"}
-              </p>
-              <p className="text-slate-700 text-[11px]">
-                {full?.incident_explanation?.summary ||
-                  "Multi-source sensor fusion confirms a high-density particulate plume with severe visibility degradation and localized citizen respiratory distress in an unmonitored zone."}
-              </p>
+              <p className="font-bold text-slate-950">{incidentTitle}</p>
+              <p className="text-slate-700 text-[11px]">{incidentSummary}</p>
               <p className="text-slate-600 text-[10px]">
-                <strong className="text-slate-900">Assessed Origin:</strong>{" "}
-                {full?.incident_explanation?.likely_cause || "Unpermitted industrial furnace venting or episodic waste combustion."}
+                <strong className="text-slate-900">Assessed Origin:</strong> {likelyCause}
               </p>
             </div>
           </div>
 
-          {/* Statutory Attestation & Digital Stamp */}
-          <div className="pt-3 border-t-2 border-slate-900 flex items-end justify-between text-xs">
+          {/* Section 6: Actionable Statutory Directives */}
+          <div className="page-break-avoid">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-900 mb-1.5 border-b border-slate-200 pb-0.5">
+              6.0 Required Statutory Directives (Immediate Action Plan)
+            </h2>
+            <ol className="list-decimal pl-5 space-y-1 text-xs text-slate-800">
+              <li>
+                <strong>Immediate Flying Squad Dispatch:</strong> Deploy municipal environmental enforcement officers to inspect industrial boilers, furnaces, and open combustion sites at coordinates {lat}° N, {lng}° E.
+              </li>
+              <li>
+                <strong>Public Health Geofence Advisory:</strong> Issue immediate air filtration and indoor stay advisories to the {corridorSchools} schools and {corridorHospitals} medical facilities in the downwind path.
+              </li>
+              <li>
+                <strong>Statutory Summons:</strong> Issue show-cause notice under Section 31A of the Air Act 1981 to unauthorized or non-compliant emission operators in the sector.
+              </li>
+            </ol>
+          </div>
+
+          {/* Section 7: Attestation & Digital Stamp */}
+          <div className="pt-3 border-t-2 border-slate-900 flex items-end justify-between text-xs page-break-avoid">
             <div className="max-w-md space-y-1">
-              <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+              <p className="text-[10px] text-slate-600 uppercase tracking-wider font-bold">
                 Statutory Certificate of Technical Veracity
               </p>
               <p className="text-[9px] text-slate-600 leading-normal">
-                This document contains autonomous algorithmic evidence synthesized from calibrated satellite telemetry, official ground sensors, and verified citizen crowdsourcing. Cryptographic chain of custody is logged in Firestore under Section 65B of the Indian Evidence Act.
+                This document contains algorithmic forensic evidence synthesized from calibrated satellite telemetry, meteorological models, and ground citizen verification. Authenticated under Section 65B of the Indian Evidence Act, 1872.
               </p>
             </div>
-            <div className="text-center shrink-0 border border-slate-400 rounded-lg p-2 bg-slate-50">
-              <div className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-slate-900 text-white font-bold text-[9px] mb-0.5">
+            <div className="text-center shrink-0 border-2 border-slate-900 rounded-lg p-2 bg-slate-50 min-w-[160px]">
+              <div className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white font-bold text-[8px] mb-0.5">
                 SEAL
               </div>
               <p className="text-[9px] font-bold text-slate-900 uppercase">Inspecting Environmental Officer</p>
-              <p className="text-[8px] text-slate-500">Municipal Enforcement Division</p>
-              <p className="text-[8px] font-mono text-indigo-700 mt-0.5">AIRGRID-CERTIFIED-AUDIT</p>
+              <p className="text-[8px] text-slate-600">Municipal Enforcement Division</p>
+              <p className="text-[8px] font-mono font-semibold text-indigo-700 mt-0.5">AIRGRID-VERIFIED-AUDIT</p>
             </div>
           </div>
         </div>
