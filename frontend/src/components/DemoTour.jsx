@@ -70,7 +70,7 @@ const ROLES = [
     what: "Report what you see — smoke, haze, burning smell. Use text, voice (in your regional language), or a photo.",
     how: [
       "Type a description in the Report Incident box, or tap the mic for voice",
-      "Select your language (Hindi, Bengali, Kannada, Marathi, Malayalam, English)",
+      "Select your language (Hindi, Malayalam, Tamil, Bengali, or English)",
       "GPS pins your location automatically — or pick a landmark",
       "Attach a photo for Gemini visual analysis",
       "Hit Submit — your report appears on the map within seconds",
@@ -117,7 +117,7 @@ const ROLES = [
 ];
 
 const FLOW_STEPS = [
-  { icon: <FileText size={13} />, color: CLR.citizen,    label: "Citizen reports",    desc: "Voice / photo / text in 6 Indian languages → Gemini extracts pollution type, severity, location" },
+  { icon: <FileText size={13} />, color: CLR.citizen,    label: "Citizen reports",    desc: "Voice / photo / text in 4 Indian languages → Gemini extracts pollution type, severity, location" },
   { icon: <Satellite size={13} />, color: CLR.blue,      label: "Satellite fusion",   desc: "Sentinel-5P aerosol index from Google Earth Engine overlaid on the same H3 grid" },
   { icon: <Radio size={13} />,     color: CLR.openaq,    label: "Ground sensors",     desc: "Live PM2.5 from OpenAQ / CPCB — sparse but precise where they exist" },
   { icon: <MapPin size={13} />,    color: CLR.hidden,    label: "Evidence fusion",    desc: "6-factor weighted confidence score (satellite 32% · citizen 24% · history 16% · sensor 12% · weather 10% · coverage 6%)" },
@@ -268,7 +268,7 @@ export default function DemoTour({ onClose }) {
             <div className="space-y-2">
               {[
                 { icon: <FileText size={12} />, label: "Text", desc: "Type what you see in the Report Incident box. Gemini translates and extracts pollution details automatically." },
-                { icon: <Mic size={12} />, label: "Voice", desc: "Click the mic icon and speak in Hindi, Bengali, Kannada, Marathi, Malayalam, or English. Gemini transcribes and classifies." },
+                { icon: <Mic size={12} />, label: "Voice", desc: "Click the mic icon and speak in Hindi, Malayalam, Tamil, Bengali, or English. Gemini transcribes and classifies." },
                 { icon: <Camera size={12} />, label: "Photo", desc: "Attach a photo of the smoke or haze. Gemini performs visual analysis — smoke density, plume source, visibility score." },
               ].map((m) => (
                 <div key={m.label} className="flex items-start gap-2.5 rounded-lg p-2.5" style={{ background: "#f9fafb", border: "1px solid #eef1f5" }}>

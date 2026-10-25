@@ -27,7 +27,7 @@ One continuous loop: **Observe → Fuse → Classify → Forecast → Alert → 
 
 | Capability | How It Works |
 | :--- | :--- |
-| 🎙️ **Multi-lingual citizen reporting** | Voice, photo, and text in **Hindi, Bengali, Kannada, Marathi, Malayalam, English**. Gemini 3.8 Flash transcribes regional audio, classifies pollution type, extracts severity and location hints — all in < 1.2s. A citizen who cannot read an AQI dashboard can hold a button and describe what they see. |
+| 🎙️ **Multi-lingual citizen reporting** | Voice, photo, and text in **Hindi, Malayalam, Tamil, Bengali, English**. Gemini 3.8 Flash transcribes regional audio, classifies pollution type, extracts severity and location hints — all in < 1.2s. A citizen who cannot read an AQI dashboard can hold a button and describe what they see. |
 | 🛰️ **Satellite aerosol fusion** | Sentinel-5P NRTI absorbing aerosol index pulled via **Google Earth Engine**. Provides top-down verification over areas where ground sensors are non-existent — the satellite sees what no monitor can. |
 | 📡 **Ground sensor integration** | Live hourly PM2.5 from **OpenAQ / CPCB** stations. Where sensors exist, they anchor the confidence score; where they don't, their absence itself becomes signal (coverage uncertainty). |
 | 🔬 **Evidence-fusion hotspot engine** | Six-factor weighted confidence scoring over Uber H3 hexagons (satellite 0.32 · citizen 0.24 · historical deviation 0.16 · sensor 0.12 · weather 0.10 · coverage uncertainty 0.06). Separates diurnal variation from real spikes using Z-score anomaly detection against 14-day baselines. |
@@ -48,7 +48,7 @@ AirGrid's demo district covers 5 Indian regions (Delhi-NCR, Mumbai, Bengaluru, K
 | Detection-to-alert latency | 24–72 hours (monthly CPCB reports) | **< 5 minutes** (real-time citizen → Gemini → map) |
 | Hidden Hotspots detected in demo | 0 (no sensor = no data) | **3 Hidden Hotspots** across sensor-free industrial zones |
 | Downwind communities warned | 0 (no propagation modeling) | **12-hour forecast** with school/hospital exposure counts |
-| Languages supported for citizen reporting | English-only dashboards | **6 Indian languages** via Gemini audio understanding |
+| Languages supported for citizen reporting | English-only dashboards | **4 Indian languages** via Gemini audio understanding |
 
 The hidden hotspots surfaced in the demo — Howrah Industrial (Kolkata), Peenya Industrial (Bengaluru), Eloor Chemical (Kerala) — are real industrial corridors with documented pollution problems but **no CAAQMS ground stations** in the immediate vicinity. AirGrid detects them through evidence fusion; the official network cannot.
 
@@ -70,7 +70,7 @@ AI proposals are **never auto-published**. Advisory text requires explicit human
 
 ```mermaid
 flowchart TD
-    A["Citizen Reports<br/>(Voice / Photo / Text in Hindi, Malayalam,<br/>Bengali, Marathi, Kannada, English)"]
+    A["Citizen Reports<br/>(Voice / Photo / Text in Hindi, Malayalam,<br/>Tamil, Bengali, English)"]
 
     B["Google Gemini 3.8 Flash<br/>(Speech Transcription · Translation · Image Severity ·<br/>Incident Feature Extraction)"]
 
@@ -110,7 +110,7 @@ flowchart TD
 
 | Technology | Role | Why Essential |
 | :--- | :--- | :--- |
-| **Gemini 3.8 Flash** | Multi-lingual audio transcription, translation, photo severity scoring, evidence summarization | Processes unstructured citizen inputs in 6 Indian languages into structured pollution parameters in < 1.2s |
+| **Gemini 3.8 Flash** | Multi-lingual audio transcription, translation, photo severity scoring, evidence summarization | Processes unstructured citizen inputs in 4 Indian languages into structured pollution parameters in < 1.2s |
 | **Google Earth Engine** | Sentinel-5P NRTI aerosol index retrieval | Satellite verification over sensor-free zones — the only top-down signal for rural/peri-urban areas |
 | **Firebase Firestore** | Real-time state persistence (incidents, alerts, acknowledgments, federation events) | Instant sync across citizen and authority dashboards with offline local JSON fallback |
 | **Google Maps / Leaflet** | H3 hex rendering, plume vectors, school/hospital POIs | Spatial command center with zero-jitter background polling |
@@ -122,7 +122,7 @@ flowchart TD
 
 Episodic hyperlocal pollution data does not exist in any public dataset — **that gap is the problem AirGrid solves.** The demo uses synthetic but realistic data:
 
-- **Citizen reports**: Pre-scripted across 5 real Indian industrial corridors with documented pollution problems. Each report uses authentic regional-language text (Hindi, Bengali, Kannada, Malayalam, Marathi).
+- **Citizen reports**: Pre-scripted across 5 real Indian industrial corridors with documented pollution problems. Each report uses authentic regional-language text (Hindi, Malayalam, Tamil, Bengali).
 - **Sensor grid**: OpenAQ live integration with rate-limited mock fallback that mirrors real CPCB station density and PM2.5 ranges for Indian metros.
 - **Historical baselines**: 14 days of generated PM2.5 history with diurnal patterns, weekend variance, and seasonal noise calibrated to published CPCB monitoring data.
 - **Demographics**: Population, schools, hospitals derived from proximity to real Indian urban centers with plausible density gradients.
