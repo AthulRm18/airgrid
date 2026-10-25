@@ -1,7 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from "react";
 import { MapContainer, TileLayer, Polygon, Polyline, Circle, Tooltip as LTooltip, useMap, useMapEvents } from "react-leaflet";
 import { cellToBoundary, cellToLatLng } from "h3-js";
-import { Wind } from "lucide-react";
 import { SEVERITY } from "../lib/severity";
 import "leaflet/dist/leaflet.css";
 
@@ -429,29 +428,6 @@ export default function HotspotMap({
           })}
         </MapContainer>
       </div>
-
-      {/* Active Plume Corridor HUD Banner */}
-      {propagation?.corridor?.length > 0 && (
-        <div className="pointer-events-auto absolute bottom-3 right-3 z-[1000] flex items-center gap-2.5 rounded-lg bg-white/95 px-3 py-2 shadow-lg border border-orange-200 text-xs backdrop-blur-xs max-w-xs transition-all">
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-xs">
-            <Wind size={14} className="animate-pulse" />
-          </div>
-          <div className="leading-tight">
-            <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px]">
-              <span>Downwind Plume Corridor</span>
-              <span className="rounded bg-orange-100 px-1 py-0.2 text-[9px] font-semibold text-orange-700">
-                {propagation.corridor.length} cells
-              </span>
-            </div>
-            <p className="mt-0.5 text-[10px] text-slate-500">
-              Wind: {propagation.weather?.wind_speed_kmh || 14} km/h ({propagation.weather?.wind_direction_deg || 315}°)
-              {propagation.corridor_impact && (
-                <span> · {propagation.corridor_impact.total_schools || 0} schools at risk</span>
-              )}
-            </p>
-          </div>
-        </div>
-      )}
 
       {!showStations && (
         <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-white/90 px-2 py-1 text-[10px] text-[#5f6f86] shadow-sm">
