@@ -106,12 +106,12 @@ const ROLES = [
     color: CLR.brics,
     label: "BRICS Feed",
     icon: <Satellite size={14} />,
-    what: "Cross-border pollution events from partner nodes (China, Brazil, Russia, South Africa).",
+    what: "Cross-border pollution events, shared predictive models, and resource coordination across BRICS partner nodes (China, Brazil, Russia, South Africa, India).",
     how: [
       "Login as BRICS Coordinator",
-      "The BRICS panel on the right shows federated events from partner countries",
-      "A correlated signal from China adds confidence to the Indian hotspot prediction",
-      "Demonstrates trans-boundary pollution intelligence sharing at scale",
+      "Switch between 3 tabs: Transboundary Hotspots, Shared Predictive Models, and Resource Coordination",
+      "Inspect cross-border models (Tsinghua CMAQ, Gangetic Fusion) or publish your own via the registry",
+      "Dispatch or track cross-border assistance requests (Mobile Raman LIDAR, UAV monitoring, calibration standards)",
     ],
   },
 ];

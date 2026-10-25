@@ -213,6 +213,120 @@ DEMO_BRICS_EVENTS = [
     },
 ]
 
+# ---------------------------------------------------------------------------
+# Pre-scripted BRICS shared predictive models
+# ---------------------------------------------------------------------------
+
+DEMO_FEDERATED_MODELS = [
+    {
+        "origin_country": "CN",
+        "model_name": "Tsinghua-CMAQ-Regional",
+        "model_version": "v2.4",
+        "target_variable": "pm25",
+        "horizon_hours": 48,
+        "training_window_days": 30,
+        "metrics": {"rmse": 7.8, "r2": 0.91, "mae": 5.4, "nme": 0.14},
+        "tags": ["transboundary", "deep-learning", "satellite-calibrated", "aerosol-transport"],
+        "artifact_uri": "brics://cma.cn/models/tsinghua-cmaq:v2.4",
+        "notes": "Calibrated with Himawari-8 & Sentinel-5P AOD for East/South Asian transboundary dust and plume dispersion.",
+    },
+    {
+        "origin_country": "BR",
+        "model_name": "Amazon-Biomass-PlumeNet",
+        "model_version": "v1.9",
+        "target_variable": "pm25",
+        "horizon_hours": 24,
+        "training_window_days": 60,
+        "metrics": {"rmse": 9.2, "r2": 0.88, "mae": 6.8},
+        "tags": ["wildfire", "biomass-smoke", "geostationary-fusion"],
+        "artifact_uri": "brics://inpe.br/models/plumenet:v1.9",
+        "notes": "Specialized LSTM-CNN ensemble for agricultural burning and low-sensor rural corridor forecasting.",
+    },
+    {
+        "origin_country": "ZA",
+        "model_name": "Highveld-Inversion-Predictor",
+        "model_version": "v3.1",
+        "target_variable": "so2",
+        "horizon_hours": 12,
+        "training_window_days": 14,
+        "metrics": {"rmse": 11.4, "r2": 0.86, "f1_score": 0.89},
+        "tags": ["thermal-inversion", "industrial-hotspot", "sensor-blind"],
+        "artifact_uri": "brics://csir.za/models/inversion:v3.1",
+        "notes": "Trained on thermal inversion traps in industrial valleys; ideal for sensor-blind industrial belts.",
+    },
+    {
+        "origin_country": "RU",
+        "model_name": "Boreal-Transpolar-Aerosol",
+        "model_version": "v2.0",
+        "target_variable": "pm25",
+        "horizon_hours": 72,
+        "training_window_days": 45,
+        "metrics": {"rmse": 8.1, "r2": 0.89, "mae": 5.9},
+        "tags": ["long-range-transport", "trajectories", "hysplit-hybrid"],
+        "artifact_uri": "brics://roshydromet.ru/models/boreal:v2.0",
+        "notes": "Coupled meteorological-chemical dispersion modeling for cross-border particle transport.",
+    },
+    {
+        "origin_country": "IN",
+        "model_name": "Gangetic-WinterSmog-Fusion",
+        "model_version": "v4.2",
+        "target_variable": "pm25",
+        "horizon_hours": 24,
+        "training_window_days": 21,
+        "metrics": {"rmse": 6.9, "r2": 0.93, "mae": 4.8},
+        "tags": ["h3-hex-fusion", "citizen-evidence", "inversion-correction"],
+        "artifact_uri": "brics://airgrid.in/models/gangetic-fusion:v4.2",
+        "notes": "AirGrid's multi-source evidence fusion model combining ground, citizen, Sentinel-5P, and meteorology.",
+    },
+]
+
+# ---------------------------------------------------------------------------
+# Pre-scripted BRICS resource coordination requests
+# ---------------------------------------------------------------------------
+
+DEMO_RESOURCE_REQUESTS = [
+    {
+        "id": "req-brics-in-01",
+        "country_code": "IN",
+        "request_type": "lidar_profiler",
+        "reason": "Requesting rapid-deployment Mobile Raman LIDAR aerosol profiler for Anand Vihar & Ghaziabad border corridor.",
+        "requested_for_h3_cell": "873e2182bffffff",
+        "priority": "urgent",
+        "resources_needed": ["1x Mobile Raman LIDAR Unit", "Boundary layer ceilometer data stream"],
+        "status": "active",
+    },
+    {
+        "id": "req-brics-za-02",
+        "country_code": "ZA",
+        "request_type": "sensor_calibration_unit",
+        "reason": "Cross-border cross-calibration transfer standard for unverified low-cost optical sensor networks in Mpumalanga.",
+        "requested_for_h3_cell": "87b2e0a12ffffff",
+        "priority": "normal",
+        "resources_needed": ["Reference Beta Attenuation Monitor (BAM-1020)", "Audit particle generator"],
+        "status": "open",
+    },
+    {
+        "id": "req-brics-br-03",
+        "country_code": "BR",
+        "request_type": "aerial_drone_monitoring",
+        "reason": "Multispectral UAV plume tracking unit for seasonal Amazon basin transboundary smoke tracking.",
+        "requested_for_h3_cell": "87a8100c7ffffff",
+        "priority": "high",
+        "resources_needed": ["2x Long-endurance VTOL UAVs with optical particle counters", "Satellite downlink receiver"],
+        "status": "in_progress",
+    },
+    {
+        "id": "req-brics-cn-04",
+        "country_code": "CN",
+        "request_type": "satellite_tasking",
+        "reason": "High-resolution Gaofen-5 hyperspectral aerosol retrieval tasking over southern border economic corridor.",
+        "requested_for_h3_cell": None,
+        "priority": "normal",
+        "resources_needed": ["Sub-kilometer aerosol optical depth pass", "Transboundary wind trajectory simulation"],
+        "status": "fulfilled",
+    },
+]
+
 # Legacy single event alias
 DEMO_BRICS_EVENT = DEMO_BRICS_EVENTS[0]
 

@@ -408,8 +408,12 @@ function App() {
         </div>
 
         {showBrics && (
-          <div className="flex w-[280px] shrink-0 flex-col overflow-hidden">
-            <BricsPanel refreshToken={refreshToken} />
+          <div className="flex w-[340px] shrink-0 flex-col overflow-hidden border-l border-[#dde3ea]">
+            <BricsPanel
+              refreshToken={refreshToken}
+              session={session}
+              sessionToken={sessionToken}
+            />
           </div>
         )}
         {showResearch && (

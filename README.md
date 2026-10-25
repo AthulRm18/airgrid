@@ -34,7 +34,7 @@ One continuous loop: **Observe → Fuse → Classify → Forecast → Alert → 
 | 🟣 **Hidden Hotspot detection** | The core differentiator. Strong citizen reports + satellite anomaly but **zero ground sensors** in range = *Hidden Hotspot* (purple hex). These are pollution events invisible to the official monitoring network — AirGrid's reason to exist. |
 | 🌬️ **Wind-aware plume forecasting** | Open-Meteo wind vectors × LightGBM 12-hour PM2.5 trajectory forecasting. Models downwind propagation corridors and counts exposed population, schools, hospitals, and clinics in the plume path — *before* the smoke arrives. |
 | 🚨 **Role-based action queue** | Citizen sees advisories in their language. Verifier dispatches field teams with evidence bundles (satellite overlay, citizen photos, forecast corridor). Authority issues geofenced public health alerts with pre-drafted regional-language text. Every acknowledgment is logged with timestamp and credentials. |
-| 🌍 **BRICS federation protocol** | Cross-border pollution event ingestion from partner nodes (China, Brazil, Russia, South Africa). Architectural demo of how trans-boundary environmental intelligence sharing would work at scale. |
+| 🌍 **BRICS federation protocol** | Interoperable environmental intelligence sharing across partner nodes (China, Brazil, Russia, South Africa, India): transboundary hotspot ingestion (`brics.v1`), federated predictive model exchange (Tsinghua CMAQ, Gangetic Fusion), and cross-border resource coordination (Mobile LIDAR, UAV monitoring). |
 
 ---
 

@@ -177,6 +177,23 @@ async def _train_forecast_on_startup():
     if persisted:
         FEDERATED_EVENTS.extend(persisted)
 
+    # Initialize BRICS shared models and resource requests if empty
+    now_init = datetime.now(timezone.utc).isoformat()
+    if not FEDERATED_MODEL_REGISTRY:
+        for m in getattr(demo_scenario, "DEMO_FEDERATED_MODELS", []):
+            model_id = f"{m['origin_country']}:{m['model_name']}:{m['model_version']}"
+            entry = dict(m)
+            entry["model_id"] = model_id
+            entry["shared_at"] = now_init
+            FEDERATED_MODEL_REGISTRY[model_id] = entry
+    if not RESOURCE_COORDINATION_REQUESTS:
+        for r in getattr(demo_scenario, "DEMO_RESOURCE_REQUESTS", []):
+            entry = dict(r)
+            entry["id"] = entry.get("id") or str(uuid.uuid4())
+            entry["created_at"] = now_init
+            entry["status"] = entry.get("status", "open")
+            RESOURCE_COORDINATION_REQUESTS.append(entry)
+
     # Auto-seed demo scenario ONLY if the database is empty (no existing reports).
     # This preserves user-submitted reports across server restarts and redeploys.
     if os.environ.get("DEMO_AUTO_SEED", "true").lower() in ("1", "true", "yes"):
@@ -1184,6 +1201,24 @@ async def seed_demo():
         brics_count += 1
     fb.save_federated_events(FEDERATED_EVENTS)
 
+    # Step 6: Seed BRICS Federated Models
+    FEDERATED_MODEL_REGISTRY.clear()
+    for m in getattr(demo_scenario, "DEMO_FEDERATED_MODELS", []):
+        model_id = f"{m['origin_country']}:{m['model_name']}:{m['model_version']}"
+        entry = dict(m)
+        entry["model_id"] = model_id
+        entry["shared_at"] = now_iso
+        FEDERATED_MODEL_REGISTRY[model_id] = entry
+
+    # Step 7: Seed BRICS Resource Coordination Requests
+    RESOURCE_COORDINATION_REQUESTS.clear()
+    for r in getattr(demo_scenario, "DEMO_RESOURCE_REQUESTS", []):
+        entry = dict(r)
+        entry["id"] = entry.get("id") or str(uuid.uuid4())
+        entry["created_at"] = now_iso
+        entry["status"] = entry.get("status", "open")
+        RESOURCE_COORDINATION_REQUESTS.append(entry)
+
     _invalidate_runtime_caches(clear_satellite=False)
     _DEMO_SEEDED = True
 
@@ -1192,6 +1227,8 @@ async def seed_demo():
         "acknowledged": demo_scenario.DEMO_PRIMARY_CELL,
         "alert_issued": demo_scenario.DEMO_PRIMARY_CELL,
         "brics_events": brics_count,
+        "shared_models": len(FEDERATED_MODEL_REGISTRY),
+        "resource_requests": len(RESOURCE_COORDINATION_REQUESTS),
         "reports": [{"h3_cell": r["h3_cell"], "source": r["source"]} for r in seeded],
     }
 
