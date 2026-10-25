@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from "react";
-import { MapContainer, TileLayer, Polygon, Circle, Tooltip as LTooltip, useMap, useMapEvents } from "react-leaflet";
-import { cellToBoundary } from "h3-js";
+import { MapContainer, TileLayer, Polygon, Polyline, Circle, Tooltip as LTooltip, useMap, useMapEvents } from "react-leaflet";
+import { cellToBoundary, cellToLatLng } from "h3-js";
+import { Wind } from "lucide-react";
 import { SEVERITY } from "../lib/severity";
 import "leaflet/dist/leaflet.css";
 
@@ -132,13 +133,45 @@ export default function HotspotMap({
   );
 
   const corridorPolygons = useMemo(() => {
-    if (!propagation?.corridor || zoom < 11) return [];
+    if (!propagation?.corridor || zoom < 9) return [];
     return propagation.corridor.flatMap((c) => {
       const positions = h3Boundary(c.h3_cell);
       if (!positions) return [];
       return [{ ...c, positions }];
     });
   }, [propagation, zoom]);
+
+  const plumeTrajectory = useMemo(() => {
+    if (!propagation?.corridor || !selectedCell || zoom < 9) return [];
+    let sourceCoord = null;
+    const match = hotspots.find((h) => h.h3_cell === selectedCell);
+    if (match && Number.isFinite(match.lat) && Number.isFinite(match.lng)) {
+      sourceCoord = [match.lat, match.lng];
+    } else {
+      try {
+        const [lat, lng] = cellToLatLng(selectedCell);
+        if (Number.isFinite(lat) && Number.isFinite(lng)) sourceCoord = [lat, lng];
+      } catch {
+        /* fallback */
+      }
+    }
+    if (!sourceCoord) return [];
+
+    const byRing = new Map();
+    for (const c of propagation.corridor) {
+      if (!Number.isFinite(c.lat) || !Number.isFinite(c.lng)) continue;
+      const prev = byRing.get(c.ring);
+      if (!prev || (c.angular_weight || 0) > (prev.angular_weight || 0)) {
+        byRing.set(c.ring, c);
+      }
+    }
+    const sortedRings = [...byRing.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, c]) => [c.lat, c.lng]);
+
+    if (!sortedRings.length) return [];
+    return [sourceCoord, ...sortedRings];
+  }, [propagation, selectedCell, hotspots, zoom]);
 
   // Pending report pins only before a hex exists — geographic Circle (meters), not pixel blobs
   const pendingPins = useMemo(() => {
@@ -213,17 +246,90 @@ export default function HotspotMap({
           <ZoomWatcher onZoom={setZoom} />
           <InitialFit hotspots={hotspots} />
 
+          {/* Plume Corridor Polygons */}
           {corridorPolygons.map((c) => {
-            const intensity = c.predicted_intensity || 0.3;
-            const color = intensity > 0.5 ? "#e87d3a" : intensity > 0.25 ? "#e8a23d" : "#e8c93d";
+            const ring = c.ring || 1;
+            let fillColor = "#ea580c";
+            let borderColor = "#c2410c";
+            let fillOpacity = 0.52;
+            let weight = 2.2;
+            let dashArray = null;
+
+            if (ring === 2) {
+              fillColor = "#f97316";
+              borderColor = "#ea580c";
+              fillOpacity = 0.44;
+              weight = 1.8;
+            } else if (ring >= 3) {
+              fillColor = "#fb923c";
+              borderColor = "#ea580c";
+              fillOpacity = 0.36;
+              weight = 1.6;
+              dashArray = "4, 4";
+            }
+
+            const arrivalTime = c.hours_to_impact != null ? `+${c.hours_to_impact}h` : "4h–12h";
+            const riskLabel = c.predicted_intensity > 0.4 ? "High Exposure" : c.predicted_intensity > 0.2 ? "Moderate Exposure" : "Advisory Zone";
+
             return (
               <Polygon
                 key={`prop-${c.h3_cell}`}
                 positions={c.positions}
-                pathOptions={{ fillColor: color, fillOpacity: 0.18, color, weight: 1, opacity: 0.45 }}
-              />
+                pathOptions={{
+                  fillColor,
+                  fillOpacity,
+                  color: borderColor,
+                  weight,
+                  opacity: 0.9,
+                  dashArray,
+                }}
+              >
+                <LTooltip sticky>
+                  <div style={{ fontSize: 11, maxWidth: 220, lineHeight: 1.4 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#ea580c" }}>
+                      <span>💨 Downwind Plume</span>
+                      <span style={{ fontSize: 10, background: "#ea580c20", padding: "1px 4px", borderRadius: 3 }}>
+                        Ring {ring} ({arrivalTime})
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 3, fontWeight: 600, color: "#16202c" }}>
+                      {riskLabel}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#5f6f86", marginTop: 2 }}>
+                      PM2.5 intensity: {(c.predicted_intensity * 100).toFixed(0)}% · {Math.round((c.angular_weight || 0) * 100)}% wind alignment
+                    </div>
+                  </div>
+                </LTooltip>
+              </Polygon>
             );
           })}
+
+          {/* Central Plume Trajectory Streamline */}
+          {plumeTrajectory.length > 1 && (
+            <>
+              <Polyline
+                positions={plumeTrajectory}
+                pathOptions={{
+                  color: "#ffffff",
+                  weight: 5,
+                  opacity: 0.75,
+                  lineCap: "round",
+                  lineJoin: "round",
+                }}
+              />
+              <Polyline
+                positions={plumeTrajectory}
+                pathOptions={{
+                  color: "#c2410c",
+                  weight: 2.8,
+                  opacity: 0.95,
+                  dashArray: "8, 6",
+                  lineCap: "round",
+                  lineJoin: "round",
+                }}
+              />
+            </>
+          )}
 
           {hexPolygons.map((h) => {
             const isSelected = selectedCell === h.h3_cell;
@@ -324,6 +430,29 @@ export default function HotspotMap({
         </MapContainer>
       </div>
 
+      {/* Active Plume Corridor HUD Banner */}
+      {propagation?.corridor?.length > 0 && (
+        <div className="pointer-events-auto absolute bottom-3 right-3 z-[1000] flex items-center gap-2.5 rounded-lg bg-white/95 px-3 py-2 shadow-lg border border-orange-200 text-xs backdrop-blur-xs max-w-xs transition-all">
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-xs">
+            <Wind size={14} className="animate-pulse" />
+          </div>
+          <div className="leading-tight">
+            <div className="flex items-center gap-1.5 font-bold text-slate-800 text-[11px]">
+              <span>Downwind Plume Corridor</span>
+              <span className="rounded bg-orange-100 px-1 py-0.2 text-[9px] font-semibold text-orange-700">
+                {propagation.corridor.length} cells
+              </span>
+            </div>
+            <p className="mt-0.5 text-[10px] text-slate-500">
+              Wind: {propagation.weather?.wind_speed_kmh || 14} km/h ({propagation.weather?.wind_direction_deg || 315}°)
+              {propagation.corridor_impact && (
+                <span> · {propagation.corridor_impact.total_schools || 0} schools at risk</span>
+              )}
+            </p>
+          </div>
+        </div>
+      )}
+
       {!showStations && (
         <div className="pointer-events-none absolute bottom-3 left-3 rounded-md bg-white/90 px-2 py-1 text-[10px] text-[#5f6f86] shadow-sm">
           Zoom in to see OpenAQ stations
@@ -366,6 +495,10 @@ function Legend() {
           {s.label}
         </span>
       ))}
+      <span className="flex items-center gap-1 border-l border-[#dde3ea] pl-2 text-orange-600 font-medium">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm bg-[#ea580c] border border-[#c2410c]" />
+        Plume Corridor
+      </span>
       <span className="flex items-center gap-1 border-l border-[#dde3ea] pl-2">
         <span className="inline-block h-2 w-2 rounded-full bg-[#0d9488]" />
         OpenAQ
