@@ -203,4 +203,5 @@ AirGrid is designed as the **intelligence and decision layer** on top of that ex
 
 Built for public good under the MIT License. AirGrid complies with responsible AI guidelines: all AI-generated public advisories require explicit human authorization before broadcast, satellite/sensor data sources are transparently cited in every evidence bundle, and all demo data is clearly labeled as synthetic.
 
-**Team**: Infinite loops
+
+**Built by**: *Team Infinite Loops - Athul R Mohan & Gourinath Sunil*
